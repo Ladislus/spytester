@@ -12,7 +12,6 @@
 #include <memory>
 
 #include <semaphore.h>
-#include <sys/syscall.h>
 
 #include "SpiedThread.h"
 #include "TracingCommand.h"
@@ -55,8 +54,6 @@ public :
     SpiedThread &getMainThread();
 
     pid_t getMainTid() const;
-
-    void handleSigTrap(SpiedThread &spiedThread);
 
     bool isTracerThread() const;
 

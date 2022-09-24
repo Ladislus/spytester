@@ -7,6 +7,7 @@
 #include "Tracer.h"
 #include "SpiedProgram.h"
 
+#include <sys/syscall.h>
 #include <sys/user.h>
 #include <dlfcn.h>
 
@@ -63,7 +64,7 @@ int Tracer::tracerMain(void * tracer) {
         {
             t->_spiedThreads.emplace(std::piecewise_construct,
                                      std::forward_as_tuple(t->_mainPid),
-                                     std::forward_as_tuple(*t, t->_mainPid));
+                                     std::forward_as_tuple(t->_spiedProgram, *t, t->_mainPid));
             std::cout<< __FUNCTION__ <<" : "<< s.getProgName() <<" ready to run!" << std::endl;
         }
     }
@@ -94,7 +95,7 @@ void Tracer::handleEvent() {
             std::cout << __FUNCTION__ << " : new thread " << pid <<" detected!"<<std::endl;
             thread = &(_spiedThreads.emplace(std::piecewise_construct,
                                              std::forward_as_tuple(pid),
-                                             std::forward_as_tuple(*this, pid)).first->second);
+                                             std::forward_as_tuple(_spiedProgram, *this, pid)).first->second);
         }
 
         if(WIFSTOPPED(wstatus))
@@ -105,10 +106,9 @@ void Tracer::handleEvent() {
             switch(signum)
             {
                 case SIGTRAP:
-                    handleSigTrap(*thread);
+                    thread->handleSigTrap();
                     break;
                 case SIGSTOP:
-                    thread->resume();
                     break;
                 default:
                     std::cerr << __FUNCTION__ << " : unexpected signal" << std::endl;
@@ -154,16 +154,13 @@ void Tracer::handleCommand() {
 
     while(sem_wait(&_cmdsSem) == 0)
     {
-        Command *cmd;
-
         _cmdsMutex.lock();
         if(!_commands.empty()) {
-            cmd = _commands.front().get();
-
-            std::cout << __FUNCTION__ << " : command received " << std::endl;
-            cmd->execute();
+            auto cmd = std::move(_commands.front());
             _commands.pop();
             _cmdsMutex.unlock();
+
+            cmd->execute();
         }
         else
         {
@@ -231,34 +228,6 @@ Tracer::~Tracer() {
 
 pid_t Tracer::getMainTid() const {
     return _mainPid;
-}
-
-void Tracer::handleSigTrap(SpiedThread &spiedThread) {
-    struct user_regs_struct regs;
-
-    if(isTracerThread()) {
-        if (ptrace(PTRACE_GETREGS, spiedThread.getTid(), NULL, &regs)) {
-            std::cerr << __FUNCTION__ << " : PTRACE_GETREGS failed : " << strerror(errno) << std::endl;
-            return;
-        }
-
-        BreakPoint *const bp = _spiedProgram.getBreakPointAt(regs.rip - 1);
-        if (bp != nullptr) {
-            bp->hit(spiedThread);
-        } else {
-            Dl_info info;
-            if (dladdr((void *) (regs.rip - 1), &info) == 0) {
-                std::cerr << __FUNCTION__ << " : unexpected SIGTRAP for thread " << spiedThread.getTid() << std::endl;
-            } else {
-                std::cout << __FUNCTION__ << " : SIGTRAP at " << info.dli_sname << " (" << info.dli_fname << ")"
-                          << std::endl;
-            }
-        }
-    }
-    else
-    {
-        command(std::make_unique<HandleSigTrapCmd>(*this, &Tracer::handleSigTrap, spiedThread));
-    }
 }
 
 bool Tracer::isTracerThread() const {

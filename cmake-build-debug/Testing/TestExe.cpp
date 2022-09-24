@@ -20,6 +20,7 @@ int main(int argc, char* argv[], char* envp[])
         if(bp != nullptr)
         {
             bp->set();
+            bp->setOnHitCallback([](BreakPoint& bp, SpiedThread& sp){bp.resumeAndSet(sp);});
         }
 
         sleep(1);

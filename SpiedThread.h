@@ -4,22 +4,27 @@
 
 #include <csignal>
 #include <mutex>
+#include <condition_variable>
 #include "TracingCommand.h"
 
 class Tracer;
+class SpiedProgram;
 
 class SpiedThread {
     const pid_t _tid;
 
     std::mutex _isRunningMutex;
+    std::condition_variable _isRunningCV;
     bool _isRunning;
+    bool _isSigTrapExpected;
 
     Tracer& _tracer;
+    SpiedProgram& _spiedProgram;
 
     using SpiedThreadCmd = TracingCommand<SpiedThread>;
 
 public:
-    explicit SpiedThread(Tracer& tracer, pid_t tid);
+    SpiedThread(SpiedProgram& spiedProgram, Tracer& tracer, pid_t tid);
 
     ~SpiedThread();
 
@@ -27,8 +32,11 @@ public:
     bool isRunning() ;
 
     void setRunning(bool isRunning);
-    void resume();
 
+    void handleSigTrap();
+
+    void resume();
+    void singleStep();
     void stop();
 };
 

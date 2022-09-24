@@ -6,7 +6,7 @@
 #include "Breakpoint.h"
 
 BreakPoint::BreakPoint(Tracer& tracer, const std::string &&name, void *addr) :
-_addr((uint64_t *)addr), _name(name), _isSet(false), _tracer(tracer){}
+_addr((uint64_t *)addr), _name(name), _isSet(false), _tracer(tracer),_onHit(BreakPoint::defaultOnHit){}
 
 
 void BreakPoint::set()
@@ -18,7 +18,7 @@ void BreakPoint::set()
             uint64_t newWord = (_backup & (~0xFF)) | INT3;
 
             if (ptrace(PTRACE_POKEDATA, _tracer.getMainTid(), _addr, newWord) == -1) {
-                std::cerr << __FUNCTION__ << " : PTRACE_POKEDATA failed : " << strerror(errno) << std::endl;
+                std::cout << __FUNCTION__ << " : PTRACE_POKEDATA failed : " << strerror(errno) << std::endl;
             } else {
                 std::cout << __FUNCTION__ << " : breakpoint (" << _name << ") set" << std::endl;
                 _isSet = true;
@@ -48,38 +48,74 @@ void BreakPoint::unset()
     }
 }
 
-void BreakPoint::restart(SpiedThread &spiedThread) {
+
+void BreakPoint::prepareToResume(SpiedThread& spiedThread)
+{
+    struct user_regs_struct regs;
+    if (ptrace(PTRACE_GETREGS, spiedThread.getTid(), NULL, &regs) == -1) {
+        std::cerr << __FUNCTION__ << ": PTRACE_GETREGS failed for thread "
+                  << spiedThread.getTid() << std::endl;
+        return;
+    }
+    regs.rip--;
+    if (ptrace(PTRACE_SETREGS, spiedThread.getTid(), NULL, &regs) == -1) {
+        std::cerr << __FUNCTION__ << ": PTRACE_SETREGS failed for thread "
+                  << spiedThread.getTid() << std::endl;
+        return;
+    }
+}
+
+
+void BreakPoint::resumeAndSet(SpiedThread &spiedThread)
+{
     if(!spiedThread.isRunning()){
-        unset();
-
-        struct user_regs_struct regs;
-        if(ptrace(PTRACE_GETREGS, spiedThread.getTid(), NULL, &regs) == -1)
+        if(_tracer.isTracerThread())
         {
-            std::cerr << __FUNCTION__ << ": PTRACE_GETREGS failed for thread "
-                      << spiedThread.getTid() << std::endl;
-            return;
+            prepareToResume(spiedThread);
+            unset();
+            spiedThread.singleStep();
+            set();
+            spiedThread.resume();
         }
-        regs.rip--;
-        if(ptrace(PTRACE_SETREGS, spiedThread.getTid(), NULL, &regs) == -1)
+        else
         {
-            std::cerr << __FUNCTION__ << ": PTRACE_SETREGS failed for thread "
-                      << spiedThread.getTid() << std::endl;
-            return;
+            _tracer.command(std::make_unique<ResumeCmd>(*this, &BreakPoint::resumeAndSet, spiedThread));
         }
-
-        spiedThread.resume();
-
     }
     else{
         std::cerr << __FUNCTION__ << " : expect stopped thread" <<std::endl;
     }
+}
 
+void BreakPoint::resumeAndUnset(SpiedThread &spiedThread) {
+    if(!spiedThread.isRunning()){
+        if(_tracer.isTracerThread()) {
+            prepareToResume(spiedThread);
+            unset();
+            spiedThread.resume();
+        }
+        else
+        {
+            _tracer.command(std::make_unique<ResumeCmd>(*this, &BreakPoint::resumeAndUnset, spiedThread));
+        }
+    }
+    else{
+        std::cerr << __FUNCTION__ << " : expect stopped thread" <<std::endl;
+    }
+}
+
+
+void BreakPoint::setOnHitCallback(void (*onHit)(BreakPoint &, SpiedThread &)) {
+    _onHit = onHit;
+}
+
+void BreakPoint::defaultOnHit(BreakPoint& breakPoint, SpiedThread& spiedThread) {
+    std::cout << __FUNCTION__ << " : thread " << spiedThread.getTid() << " hit breakpoint"
+              << breakPoint._name << " at 0x" << std::hex << breakPoint._addr << std::dec << std::endl;
 }
 
 void BreakPoint::hit(SpiedThread &spiedThread) {
-    std::cout << __FUNCTION__ << " : thread " << spiedThread.getTid() << " hit breakpoint"
-    << _name << " at 0x" << std::hex << _addr << std::dec << std::endl;
-
-    restart(spiedThread);
+    defaultOnHit(*this, spiedThread);
+    _onHit(*this, spiedThread);
 }
 
