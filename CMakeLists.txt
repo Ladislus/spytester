@@ -1,10 +1,10 @@
 cmake_minimum_required(VERSION 3.23)
 project(SpyTester)
 enable_language(C ASM)
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 17)
 
 add_library(SpyTester SHARED SpiedProgram.cpp utils.S SpiedProgram.h SpiedThread.cpp SpiedThread.h Tracer.cpp Tracer.h Breakpoint.cpp Breakpoint.h TracingCommand.h)
-target_link_libraries(SpyTester dl)
+target_link_libraries(SpyTester dl pthread)
 set_target_properties(SpyTester PROPERTIES BUILD_RPATH_USE_ORIGIN TRUE)
 set_target_properties(SpyTester PROPERTIES BUILD_RPATH .)
 

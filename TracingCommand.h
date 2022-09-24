@@ -7,26 +7,30 @@
 
 
 #include <queue>
+#include <functional>
+#include <iostream>
 
 class Command
 {
 public:
     virtual void execute() = 0;
+    virtual ~Command() = default;
 };
 
-template <typename T> class TracingCommand : public Command
+template <typename T, typename ... TArgs> class TracingCommand : public Command
 {
-    T& _obj;
-    void(T::*_method)();
+    void(T::*_method)(TArgs ...);
+    std::tuple<T&, TArgs ...> _args;
 
-    virtual void execute()
+    void execute() override
     {
-        (_obj.*_method)();
+        std::apply(std::mem_fn(_method), _args);
     }
 
 public:
-    TracingCommand(T& obj, void(T::*method)())
-    : _obj(obj), _method(method){}
+    TracingCommand(T& obj, void(T::*method)(TArgs ...), TArgs ... args)
+    : _method(method), _args(obj, args ...){}
 };
+
 
 #endif //SPYTESTER_TRACINGCOMMAND_H

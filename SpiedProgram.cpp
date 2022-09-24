@@ -43,7 +43,7 @@ SpiedProgram::SpiedProgram(std::string&& progName, int argc, char* argv, char* e
 
     _tracer = new Tracer(*this);
 
-    sleep(2); // #TODO create synchronisation with _tracer
+    sleep(1); // #TODO create synchronisation with _tracer
 }
 
 SpiedProgram::~SpiedProgram(){

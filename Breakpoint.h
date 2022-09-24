@@ -21,11 +21,7 @@ class BreakPoint {
     bool _isSet;
     Tracer& _tracer;
 
-    void privSet();
-    void privUnset();
-
-    TracingCommand<BreakPoint> _setCommand;
-    TracingCommand<BreakPoint> _unsetCommand;
+    using BreakPointCmd = TracingCommand<BreakPoint>;
 
 public:
     BreakPoint(Tracer& tracer, const std::string&& name, void* addr);

@@ -22,6 +22,8 @@ int main(int argc, char* argv[], char* envp[])
             bp->set();
         }
 
+        sleep(1);
+
         prog.run();
 
         sleep(1);

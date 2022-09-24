@@ -23,14 +23,14 @@ void* TestPthreadFunction(void* arg)
     {
         return nullptr;
     }
-    std::cout << __FUNCTION__ << " : hola!" << std::endl;
+    std::cout << __FUNCTION__ << " : "<< getpid() << std::endl;
 
     return nullptr;
 }
 
 int main(int argc, char* argv[], char* envp[])
 {
-    std::cout << argv[0] <<" started!" << std::endl;
+    std::cout << argv[0] << " ("<< getpid() <<") : started!" << std::endl;
 
     TestFunction();
     (void)TestFunction2();

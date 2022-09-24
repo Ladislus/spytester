@@ -1,7 +1,3 @@
-//
-// Created by baptiste on 13/09/22.
-//
-
 #include "SpiedThread.h"
 #include "Tracer.h"
 
@@ -9,10 +5,9 @@
 
 #include <iostream>
 #include <cstring>
-#include <unistd.h>
 
-SpiedThread::SpiedThread(Tracer& tracer, pid_t pid) : _tracer(tracer), _pid(pid), _isRunning(false),
-_resumeCommand(*this, &SpiedThread::resume), _stopCommand(*this, &SpiedThread::stop) {}
+SpiedThread::SpiedThread(Tracer& tracer, pid_t tid) : _tracer(tracer), _tid(tid), _isRunning(false)
+{}
 
 bool SpiedThread::isRunning(){
     bool isRunning;
@@ -27,30 +22,30 @@ bool SpiedThread::isRunning(){
 void SpiedThread::resume() {
     if(!isRunning())
     {
-        if(_tracer.getPid() == getpid())
+        if(_tracer.isTracerThread())
         {
-            if(ptrace(PTRACE_CONT, _pid, nullptr, nullptr) == -1) {
-                std::cout << __FUNCTION__ << " : PTRACE_CONT failed : "<< strerror(errno) << std::endl;
+            if(ptrace(PTRACE_CONT, _tid, nullptr, nullptr) == -1) {
+                std::cerr << __FUNCTION__ << " : PTRACE_CONT failed for " << _tid << " : " << strerror(errno) << std::endl;
             }
         }
         else
         {
-            _tracer.command(&_resumeCommand);
+            _tracer.command(std::make_unique<SpiedThreadCmd>(*this, &SpiedThread::resume));
         }
     }
 }
 
 void SpiedThread::stop() {
     if(isRunning()) {
-        if(_tracer.getPid() == getpid())
+        if(_tracer.isTracerThread())
         {
-            if (kill(_pid, SIGSTOP) == -1) {
-                std::cerr << __FUNCTION__ << " : SIGSTOP failed for "<<_pid<<" : "<<strerror(errno)<<std::endl;
+            if (kill(_tid, SIGSTOP) == -1) {
+                std::cerr << __FUNCTION__ << " : SIGSTOP failed for " << _tid << " : " << strerror(errno) << std::endl;
             }
         }
         else
         {
-            _tracer.command(&_stopCommand);
+            _tracer.command(std::make_unique<SpiedThreadCmd>(*this, &SpiedThread::stop));
         }
     }
 }
@@ -61,11 +56,11 @@ void SpiedThread::setRunning(bool isRunning) {
     _isRunningMutex.unlock();
 }
 
-pid_t SpiedThread::getPid() const {
-    return _pid;
+pid_t SpiedThread::getTid() const {
+    return _tid;
 }
 
 SpiedThread::~SpiedThread() {
-    std::cout << __FUNCTION__ <<" : " << _pid << std::endl;
+    std::cout << __FUNCTION__ << " : " << _tid << std::endl;
 }
 
