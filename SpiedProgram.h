@@ -10,6 +10,7 @@
 #include "Breakpoint.h"
 #include "TracingCommand.h"
 #include "Tracer.h"
+#include "WrappedFunction.h"
 
 #include <string>
 #include <map>
@@ -49,11 +50,19 @@ public:
     BreakPoint* createBreakPoint(void* addr,
                                  std::string&& name = "BreakPoint"+std::to_string(breakPointCounter));
 
+    template<typename TRET, typename ... ARGS>
+    WrappedFunction<TRET, ARGS ...>* createWrappedFunction(std::string&& binName, TRET (*function)(ARGS ...));
+
     void run();
     void exit();
 
-    BreakPoint *getBreakPointAt(unsigned long long int addr);
+    BreakPoint *getBreakPointAt(unsigned long addr);
 };
 
+template<typename TRET, typename... ARGS>
+WrappedFunction<TRET, ARGS...> *SpiedProgram::createWrappedFunction(std::string &&binName, TRET (*function)(ARGS...)) {
+    // #TODO add wrapped function management in SpiedProgram
+    return new WrappedFunction<TRET, ARGS...>(*_tracer, binName, function);
+}
 
 #endif //SPYTESTER_SPIEDPROGRAM_H

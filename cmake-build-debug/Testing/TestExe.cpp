@@ -1,4 +1,5 @@
 #include "../../SpiedProgram.h"
+#include "TestLib.h"
 
 #include <iostream>
 #include <cstdlib>
@@ -29,11 +30,15 @@ int main(int argc, char* argv[], char* envp[])
 
         sleep(1);
 
+        auto f = prog.createWrappedFunction("TestProgram", testLibFunction);
+        f->set([](int a){std::cout<< "HELLO!" <<std::endl; return a+2;});
+
         prog.run();
 
         sleep(100);
     }
     catch(const std::invalid_argument& e){
+        sleep(10);
         std::cerr << "SpiedProgram failed : " << e.what() << std::endl;
         std::exit(1);
     }

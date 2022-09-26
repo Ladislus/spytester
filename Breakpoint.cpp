@@ -110,7 +110,7 @@ void BreakPoint::setOnHitCallback(void (*onHit)(BreakPoint &, SpiedThread &)) {
 }
 
 void BreakPoint::defaultOnHit(BreakPoint& breakPoint, SpiedThread& spiedThread) {
-    std::cout << __FUNCTION__ << " : thread " << spiedThread.getTid() << " hit breakpoint"
+    std::cout << __FUNCTION__ << " : thread " << spiedThread.getTid() << " hit breakpoint "
               << breakPoint._name << " at 0x" << std::hex << breakPoint._addr << std::dec << std::endl;
 }
 

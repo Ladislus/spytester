@@ -90,7 +90,7 @@ char *SpiedProgram::getStackTop() {
     return (char*)_stack+stackSize;
 }
 
-BreakPoint *SpiedProgram::getBreakPointAt(unsigned long long int addr) {
+BreakPoint *SpiedProgram::getBreakPointAt(unsigned long addr) {
     BreakPoint* bp = nullptr;
 
     auto it = _breakPoints.find((void*)addr);

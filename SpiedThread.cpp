@@ -98,8 +98,9 @@ void SpiedThread::singleStep() {
 }
 
 void SpiedThread::handleSigTrap() {
-    struct user_regs_struct regs;
     if(!_isSigTrapExpected) {
+        struct user_regs_struct regs;
+
         if (_tracer.isTracerThread()) {
             if (ptrace(PTRACE_GETREGS, _tid, NULL, &regs)) {
                 std::cout << __FUNCTION__ << " : PTRACE_GETREGS failed : " << strerror(errno) << std::endl;

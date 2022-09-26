@@ -8,7 +8,6 @@
 #include "SpiedProgram.h"
 
 #include <sys/syscall.h>
-#include <sys/user.h>
 #include <dlfcn.h>
 
 #define gettid() syscall(SYS_gettid)
@@ -47,7 +46,6 @@ int Tracer::tracerMain(void * tracer) {
         std::cerr << __FUNCTION__ <<" : clone failed : "<< strerror(errno) <<std::endl;
         return 1;
     }
-
 
     int wstatus;
     if(waitpid(t->_mainPid, &wstatus, 0) == -1)
@@ -109,6 +107,7 @@ void Tracer::handleEvent() {
                     thread->handleSigTrap();
                     break;
                 case SIGSTOP:
+                    thread->resume();
                     break;
                 default:
                     std::cerr << __FUNCTION__ << " : unexpected signal" << std::endl;
@@ -130,6 +129,8 @@ void Tracer::handleEvent() {
             std::cout << __FUNCTION__<<" : thread "<<pid<<" exits with signal "<<WTERMSIG(wstatus)<<std::endl;
         }
     }
+
+    sleep(500);
 
     std::cout << __FUNCTION__ << " exit" << std::endl;
 }

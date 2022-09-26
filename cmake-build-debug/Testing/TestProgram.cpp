@@ -2,6 +2,7 @@
 
 #include <iostream>
 #include <unistd.h>
+#include "TestLib.h"
 
 void TestFunction()
 {
@@ -23,14 +24,23 @@ void* TestPthreadFunction(void* arg)
     {
         return nullptr;
     }
-    std::cout << __FUNCTION__ << " : "<< getpid() << std::endl;
+    int tmp = 0;
+    while(1)
+    {
+        tmp = testLibFunction(tmp);
+        std::cout << __FUNCTION__ <<" : testLibFunction(tmp) = "<< tmp <<std::endl;
+        sleep(2);
+    }
 
     return nullptr;
 }
 
 int main(int argc, char* argv[], char* envp[])
 {
-    std::cout << argv[0] << " ("<< getpid() <<") : started!" << std::endl;
+    printf("ICI ibzefbizebfibz : %p\n", &std::cout);
+    //std::cerr << "ICI ibzefbizebfibz 2" << std::endl;
+    std::cout << "ICI ibzefbizebfibz 3" << std::endl;
+    //std::cout << argv[0] << " ("<< getpid() <<") : started!" << std::endl;
 
     TestFunction();
     (void)TestFunction2();
