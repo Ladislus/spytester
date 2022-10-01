@@ -35,6 +35,9 @@ public:
     BreakPoint(Tracer& tracer, const std::string&& name, void* addr);
 
     ~BreakPoint() = default;
+
+    void* getAddr() const;
+
     void set();
     void unset();
 

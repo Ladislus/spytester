@@ -13,8 +13,18 @@ static const size_t stackSize = 1<<23;
 
 uint32_t SpiedProgram::breakPointCounter = 0;
 
+void defaultOnAddThread(SpiedThread& spiedThread)
+{
+    std::cout << "New thread "<< spiedThread.getTid() <<" created" <<std::endl;
+}
+
+void defaultOnRemoveThread(SpiedThread& spiedThread)
+{
+    std::cout << "Thread "<< spiedThread.getTid() <<" deleted" <<std::endl;
+}
+
 SpiedProgram::SpiedProgram(std::string&& progName, int argc, char* argv, char* envp)
-: _progName(progName) {
+: _progName(progName), _onThreadStart(defaultOnAddThread), _onThreadExit(defaultOnRemoveThread) {
 
     _progParam.argc = (uint64_t) argc;
     _progParam.argv = argv;
@@ -51,11 +61,25 @@ SpiedProgram::~SpiedProgram(){
     delete _tracer;
 }
 
-void SpiedProgram::exit() {}
+void SpiedProgram::terminate() {
+    for(auto & spiedThread : _spiedThreads)
+    {
+        spiedThread->terminate();
+    }
+}
+
+void SpiedProgram::stop(){
+    for(auto & spiedThread : _spiedThreads)
+    {
+        spiedThread->stop();
+    }
+}
 
 void SpiedProgram::run() {
-    SpiedThread& mainThread = _tracer->getMainThread();
-    mainThread.resume();
+    for(auto & spiedThread : _spiedThreads)
+    {
+        spiedThread->resume(0);
+    }
 }
 
 BreakPoint* SpiedProgram::createBreakPoint(std::string &&symbName) {
@@ -70,14 +94,6 @@ BreakPoint* SpiedProgram::createBreakPoint(std::string &&symbName) {
     return createBreakPoint(addr, std::move(symbName));
 }
 
-BreakPoint *SpiedProgram::createBreakPoint(void *addr, std::string &&name) {
-     auto it = _breakPoints.emplace(std::piecewise_construct,
-                                    std::forward_as_tuple(addr),
-                                    std::forward_as_tuple(*_tracer, std::move(name), addr)).first; //#TODO simplify
-
-    return &it->second;
-}
-
 ProgParam *SpiedProgram::getProgParam() {
     return &_progParam;
 }
@@ -90,17 +106,66 @@ char *SpiedProgram::getStackTop() {
     return (char*)_stack+stackSize;
 }
 
-BreakPoint *SpiedProgram::getBreakPointAt(unsigned long addr) {
+
+// Exec Breakpoint Management
+BreakPoint *SpiedProgram::createBreakPoint(void *addr, std::string &&name) {
+    _breakPoints.emplace_back(std::make_unique<BreakPoint>(*_tracer, std::move(name), addr));
+    return _breakPoints.back().get();
+}
+
+BreakPoint *SpiedProgram::getBreakPointAt(void* addr) {
     BreakPoint* bp = nullptr;
 
-    auto it = _breakPoints.find((void*)addr);
-    if(it != _breakPoints.end())
+    for(auto &breakPoint : _breakPoints)
     {
-        bp = &(it->second);
+        if(breakPoint->getAddr() == addr){
+            bp = breakPoint.get();
+        }
     }
 
     return bp;
 }
+
+// Thread Management
+SpiedThread *SpiedProgram::getSpiedThread(pid_t tid) {
+    SpiedThread *spiedThread = nullptr;
+
+    for (auto &ptr: _spiedThreads) {
+        if (tid == ptr->getTid()) {
+            spiedThread = ptr.get();
+            break;
+        }
+    }
+    return spiedThread;
+}
+
+void SpiedProgram::setOnThreadStart(void(*onThreadStart)(SpiedThread &)) {
+    _onThreadStart = onThreadStart;
+}
+
+void SpiedProgram::setOnThreadExit(void (*onThreadExit)(SpiedThread &)) {
+    _onThreadExit = onThreadExit;
+}
+
+SpiedThread *SpiedProgram::onThreadStart(pid_t tid) {
+    _spiedThreads.emplace_back(std::make_unique<SpiedThread>(*this, *_tracer, tid));
+    _onThreadStart(*_spiedThreads.back());
+    return _spiedThreads.back().get();
+}
+
+void SpiedProgram::onThreadExit(pid_t tid) {
+    auto it = _spiedThreads.begin();
+    for (; it != _spiedThreads.end(); it++) {
+        if ((*it)->getTid() == tid) break;
+    }
+
+    if (it != _spiedThreads.end()) {
+        _onThreadExit(**it);
+    } else {
+        std::cerr << __FUNCTION__ << " : unknown thread " << tid << std::endl;
+    }
+}
+
 
 
 

@@ -35,6 +35,10 @@ int main(int argc, char* argv[], char* envp[])
 
         prog.run();
 
+        sleep(5);
+
+        prog.terminate();
+
         sleep(100);
     }
     catch(const std::invalid_argument& e){

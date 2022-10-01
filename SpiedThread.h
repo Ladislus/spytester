@@ -22,10 +22,11 @@ class SpiedThread {
     SpiedProgram& _spiedProgram;
 
     using SpiedThreadCmd = TracingCommand<SpiedThread>;
+    using ResumeCmd = TracingCommand<SpiedThread, int>;
 
 public:
     SpiedThread(SpiedProgram& spiedProgram, Tracer& tracer, pid_t tid);
-
+    SpiedThread(SpiedThread&& spiedThread) = default;
     ~SpiedThread();
 
     pid_t getTid() const;
@@ -34,10 +35,12 @@ public:
     void setRunning(bool isRunning);
 
     void handleSigTrap();
+    void handleSigStop();
 
-    void resume();
+    void resume(int signum);
     void singleStep();
     void stop();
+    void terminate();
 };
 
 

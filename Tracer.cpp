@@ -60,9 +60,7 @@ int Tracer::tracerMain(void * tracer) {
         }
         else
         {
-            t->_spiedThreads.emplace(std::piecewise_construct,
-                                     std::forward_as_tuple(t->_mainPid),
-                                     std::forward_as_tuple(t->_spiedProgram, *t, t->_mainPid));
+            (void) t->_spiedProgram.onThreadStart(t->_mainPid);
             std::cout<< __FUNCTION__ <<" : "<< s.getProgName() <<" ready to run!" << std::endl;
         }
     }
@@ -82,57 +80,54 @@ void Tracer::handleEvent() {
     std::cout << __FUNCTION__ << " : start handling events!" << std::endl;
 
     int wstatus;
-    pid_t pid;
-    while((pid = wait(&wstatus)) > 0)
+    pid_t tid;
+    while((tid = wait(&wstatus)) > 0)
     {
-        auto it = _spiedThreads.find(pid);
-        SpiedThread* thread = &(it->second);
+        SpiedThread* thread = _spiedProgram.getSpiedThread(tid);
 
-        if(it == _spiedThreads.end())
+        if(thread == nullptr)
         {
-            std::cout << __FUNCTION__ << " : new thread " << pid <<" detected!"<<std::endl;
-            thread = &(_spiedThreads.emplace(std::piecewise_construct,
-                                             std::forward_as_tuple(pid),
-                                             std::forward_as_tuple(_spiedProgram, *this, pid)).first->second);
+            std::cout << __FUNCTION__ << " : new thread " << tid <<" detected!"<<std::endl;
+            thread = _spiedProgram.onThreadStart(tid);
         }
 
         if(WIFSTOPPED(wstatus))
         {
             thread->setRunning(false);
             int signum = WSTOPSIG(wstatus);
-            std::cout << __FUNCTION__ << " : thread " << pid <<" stopped : SIG = " << signum<< std::endl;
+            std::cout << __FUNCTION__ << " : thread " << tid <<" stopped : SIG = " << signum<< std::endl;
             switch(signum)
             {
                 case SIGTRAP:
                     thread->handleSigTrap();
                     break;
                 case SIGSTOP:
-                    thread->resume();
                     break;
                 default:
-                    std::cerr << __FUNCTION__ << " : unexpected signal" << std::endl;
+                    thread->resume(signum);
+                    break;
             }
         }
         else if(WIFCONTINUED(wstatus))
         {
             thread->setRunning(true);
-            std::cout << __FUNCTION__  <<" : thread " << pid <<" resumed!" << std::endl;
+            std::cout << __FUNCTION__  <<" : thread " << tid <<" resumed!" << std::endl;
         }
         else if(WIFEXITED(wstatus))
         {
             thread->setRunning(false);
-            std::cout << __FUNCTION__ <<" : thread "<<pid<<" exits with code "<<WEXITSTATUS(wstatus)<<std::endl;
+            std::cout << __FUNCTION__ <<" : thread "<< tid <<" exits with code "<<WEXITSTATUS(wstatus)<<std::endl;
         }
         else if(WIFSIGNALED(wstatus))
         {
             thread->setRunning(false);
-            std::cout << __FUNCTION__<<" : thread "<<pid<<" exits with signal "<<WTERMSIG(wstatus)<<std::endl;
+            std::cout << __FUNCTION__<<" : thread "<< tid <<" exits with signal "<<WTERMSIG(wstatus)<<std::endl;
         }
     }
 
-    sleep(500);
-
-    std::cout << __FUNCTION__ << " exit" << std::endl;
+    _isTracing = false;
+    sem_post(&_cmdsSem);
+    std::cout << __FUNCTION__ << ": stop handling events!" << std::endl;
 }
 
 int Tracer::eventHandler(void* tracer) {
@@ -150,11 +145,13 @@ int Tracer::eventHandler(void* tracer) {
 void Tracer::handleCommand() {
     //Get next command to execute
     std::cout << __FUNCTION__ << " : start handling commands!" << std::endl;
-
     _tracerTid = gettid();
 
-    while(sem_wait(&_cmdsSem) == 0)
+    while(_isTracing)
     {
+        if(sem_wait(&_cmdsSem) != 0)
+            break;
+
         _cmdsMutex.lock();
         if(!_commands.empty()) {
             auto cmd = std::move(_commands.front());
@@ -163,18 +160,17 @@ void Tracer::handleCommand() {
 
             cmd->execute();
         }
-        else
-        {
+        else{
             _cmdsMutex.unlock();
-            break;
         }
     }
+
+    std::cout << __FUNCTION__ << " : stop handling commands!" << std::endl;
 }
 
 Tracer::Tracer(SpiedProgram &spiedProgram)
-:_spiedProgram(spiedProgram)
+:_spiedProgram(spiedProgram), _isTracing(true)
 {
-
     if(sem_init(&_cmdsSem, 0, 0) == -1)
     {
         std::cerr << __FUNCTION__ << " : semaphore initialization failed : " << strerror(errno) << std::endl;
@@ -212,14 +208,6 @@ void Tracer::command(std::unique_ptr<Command> cmd) {
         _cmdsMutex.unlock();
         sem_post(&_cmdsSem);
     }
-}
-
-void Tracer::stop() {
-
-}
-
-SpiedThread &Tracer::getMainThread() {
-    return _spiedThreads.at(_mainPid);
 }
 
 Tracer::~Tracer() {

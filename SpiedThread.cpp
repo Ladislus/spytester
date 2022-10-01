@@ -14,6 +14,14 @@ SpiedThread::SpiedThread(SpiedProgram& spiedProgram, Tracer& tracer, pid_t tid) 
 _isSigTrapExpected(false), _spiedProgram(spiedProgram)
 {}
 
+SpiedThread::~SpiedThread() {
+    std::cout << __FUNCTION__ << " : " << _tid << std::endl;
+}
+
+pid_t SpiedThread::getTid() const {
+    return _tid;
+}
+
 bool SpiedThread::isRunning(){
     bool isRunning;
 
@@ -24,37 +32,6 @@ bool SpiedThread::isRunning(){
     return isRunning;
 }
 
-void SpiedThread::resume() {
-    if(!isRunning())
-    {
-        if(_tracer.isTracerThread())
-        {
-            if(ptrace(PTRACE_CONT, _tid, nullptr, nullptr) == -1) {
-                std::cerr << __FUNCTION__ << " : PTRACE_CONT failed for " << _tid << " : " << strerror(errno) << std::endl;
-            }
-        }
-        else
-        {
-            _tracer.command(std::make_unique<SpiedThreadCmd>(*this, &SpiedThread::resume));
-        }
-    }
-}
-
-void SpiedThread::stop() {
-    if(isRunning()) {
-        if(_tracer.isTracerThread())
-        {
-            if (kill(_tid, SIGSTOP) == -1) {
-                std::cerr << __FUNCTION__ << " : SIGSTOP failed for " << _tid << " : " << strerror(errno) << std::endl;
-            }
-        }
-        else
-        {
-            _tracer.command(std::make_unique<SpiedThreadCmd>(*this, &SpiedThread::stop));
-        }
-    }
-}
-
 void SpiedThread::setRunning(bool isRunning) {
     _isRunningMutex.lock();
     _isRunning = isRunning;
@@ -62,12 +39,20 @@ void SpiedThread::setRunning(bool isRunning) {
     _isRunningCV.notify_all();
 }
 
-pid_t SpiedThread::getTid() const {
-    return _tid;
-}
-
-SpiedThread::~SpiedThread() {
-    std::cout << __FUNCTION__ << " : " << _tid << std::endl;
+void SpiedThread::resume(int signum) {
+    if(!isRunning())
+    {
+        if(_tracer.isTracerThread())
+        {
+            if(ptrace(PTRACE_CONT, _tid, nullptr, signum) == -1) {
+                std::cerr << __FUNCTION__ << " : PTRACE_CONT failed for " << _tid << " : " << strerror(errno) << std::endl;
+            }
+        }
+        else
+        {
+            _tracer.command(std::make_unique<ResumeCmd>(*this, &SpiedThread::resume, signum));
+        }
+    }
 }
 
 void SpiedThread::singleStep() {
@@ -97,6 +82,34 @@ void SpiedThread::singleStep() {
 
 }
 
+void SpiedThread::stop() {
+    if(isRunning()) {
+        if(_tracer.isTracerThread())
+        {
+            if (kill(_tid, SIGSTOP) == -1) {
+                std::cerr << __FUNCTION__ << " : SIGSTOP failed for " << _tid << " : " << strerror(errno) << std::endl;
+            }
+        }
+        else
+        {
+            _tracer.command(std::make_unique<SpiedThreadCmd>(*this, &SpiedThread::stop));
+        }
+    }
+}
+
+void SpiedThread::terminate() {
+    if(_tracer.isTracerThread())
+    {
+        if (kill(_tid, SIGTERM) == -1) {
+            std::cerr << __FUNCTION__ << " : SIGTERM failed for " << _tid << " : " << strerror(errno) << std::endl;
+        }
+    }
+    else
+    {
+        _tracer.command(std::make_unique<SpiedThreadCmd>(*this, &SpiedThread::terminate));
+    }
+}
+
 void SpiedThread::handleSigTrap() {
     if(!_isSigTrapExpected) {
         struct user_regs_struct regs;
@@ -107,7 +120,7 @@ void SpiedThread::handleSigTrap() {
                 return;
             }
 
-            BreakPoint *const bp = _spiedProgram.getBreakPointAt(regs.rip - 1);
+            BreakPoint *const bp = _spiedProgram.getBreakPointAt((void*)(regs.rip - 1));
             if (bp != nullptr) {
                 bp->hit(*this);
             } else {

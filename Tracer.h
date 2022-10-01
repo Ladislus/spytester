@@ -35,8 +35,8 @@ class Tracer {
     pid_t _mainPid;
     void* _cmdrStack;
     void* _waitrStack;
-    std::map<pid_t, SpiedThread> _spiedThreads;
 
+    bool _isTracing;
     sem_t _cmdsSem;
     std::mutex _cmdsMutex;
     std::queue<std::unique_ptr<Command>> _commands;
@@ -48,10 +48,6 @@ public :
 
     ~Tracer();
     void command(std::unique_ptr<Command> cmd);
-
-    void stop();
-
-    SpiedThread &getMainThread();
 
     pid_t getMainTid() const;
 

@@ -9,6 +9,10 @@ BreakPoint::BreakPoint(Tracer& tracer, const std::string &&name, void *addr) :
 _addr((uint64_t *)addr), _name(name), _isSet(false), _tracer(tracer),_onHit(BreakPoint::defaultOnHit){}
 
 
+void *BreakPoint::getAddr() const{
+    return _addr;
+}
+
 void BreakPoint::set()
 {
     if(!_isSet)
@@ -29,6 +33,7 @@ void BreakPoint::set()
         }
     }
 }
+
 
 void BreakPoint::unset()
 {
@@ -65,7 +70,6 @@ void BreakPoint::prepareToResume(SpiedThread& spiedThread)
     }
 }
 
-
 void BreakPoint::resumeAndSet(SpiedThread &spiedThread)
 {
     if(!spiedThread.isRunning()){
@@ -75,7 +79,7 @@ void BreakPoint::resumeAndSet(SpiedThread &spiedThread)
             unset();
             spiedThread.singleStep();
             set();
-            spiedThread.resume();
+            spiedThread.resume(0);
         }
         else
         {
@@ -87,12 +91,13 @@ void BreakPoint::resumeAndSet(SpiedThread &spiedThread)
     }
 }
 
+
 void BreakPoint::resumeAndUnset(SpiedThread &spiedThread) {
     if(!spiedThread.isRunning()){
         if(_tracer.isTracerThread()) {
             prepareToResume(spiedThread);
             unset();
-            spiedThread.resume();
+            spiedThread.resume(0);
         }
         else
         {
@@ -103,7 +108,6 @@ void BreakPoint::resumeAndUnset(SpiedThread &spiedThread) {
         std::cerr << __FUNCTION__ << " : expect stopped thread" <<std::endl;
     }
 }
-
 
 void BreakPoint::setOnHitCallback(void (*onHit)(BreakPoint &, SpiedThread &)) {
     _onHit = onHit;
