@@ -37,6 +37,9 @@ class Tracer {
     void* _waitrStack;
 
     bool _isTracing;
+    std::mutex _tracingMutex;
+    std::condition_variable _tracingCV;
+
     sem_t _cmdsSem;
     std::mutex _cmdsMutex;
     std::queue<std::unique_ptr<Command>> _commands;

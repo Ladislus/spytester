@@ -81,7 +81,8 @@ void Tracer::handleEvent() {
 
     int wstatus;
     pid_t tid;
-    while((tid = wait(&wstatus)) > 0)
+    // Wait until all child threads exit
+    while((tid = waitpid(-1, &wstatus, WCONTINUED)) > 0)
     {
         SpiedThread* thread = _spiedProgram.getSpiedThread(tid);
 
@@ -93,7 +94,7 @@ void Tracer::handleEvent() {
 
         if(WIFSTOPPED(wstatus))
         {
-            thread->setRunning(false);
+            thread->setState(SpiedThread::STOPPED);
             int signum = WSTOPSIG(wstatus);
             std::cout << __FUNCTION__ << " : thread " << tid <<" stopped : SIG = " << signum<< std::endl;
             switch(signum)
@@ -110,17 +111,17 @@ void Tracer::handleEvent() {
         }
         else if(WIFCONTINUED(wstatus))
         {
-            thread->setRunning(true);
+            thread->setState(SpiedThread::RUNNING);
             std::cout << __FUNCTION__  <<" : thread " << tid <<" resumed!" << std::endl;
         }
         else if(WIFEXITED(wstatus))
         {
-            thread->setRunning(false);
+            thread->setState(SpiedThread::TERMINATED);
             std::cout << __FUNCTION__ <<" : thread "<< tid <<" exits with code "<<WEXITSTATUS(wstatus)<<std::endl;
         }
         else if(WIFSIGNALED(wstatus))
         {
-            thread->setRunning(false);
+            thread->setState(SpiedThread::TERMINATED);
             std::cout << __FUNCTION__<<" : thread "<< tid <<" exits with signal "<<WTERMSIG(wstatus)<<std::endl;
         }
     }
@@ -147,6 +148,8 @@ void Tracer::handleCommand() {
     std::cout << __FUNCTION__ << " : start handling commands!" << std::endl;
     _tracerTid = gettid();
 
+    _tracingMutex.lock();
+
     while(_isTracing)
     {
         if(sem_wait(&_cmdsSem) != 0)
@@ -164,8 +167,10 @@ void Tracer::handleCommand() {
             _cmdsMutex.unlock();
         }
     }
-
     std::cout << __FUNCTION__ << " : stop handling commands!" << std::endl;
+
+    _tracingMutex.unlock();
+    _tracingCV.notify_all();
 }
 
 Tracer::Tracer(SpiedProgram &spiedProgram)
@@ -211,6 +216,12 @@ void Tracer::command(std::unique_ptr<Command> cmd) {
 }
 
 Tracer::~Tracer() {
+    std::unique_lock lk(_tracingMutex);
+    if(_isTracing){
+        // wait for tracing to be stopped
+        _tracingCV.wait(lk, [this](){return !_isTracing;});
+    }
+
     sem_destroy(&_cmdsSem);
     std::cout<< __FUNCTION__ << std::endl;
 }

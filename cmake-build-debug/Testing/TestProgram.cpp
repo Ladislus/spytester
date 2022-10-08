@@ -28,7 +28,6 @@ void* TestPthreadFunction(void* arg)
     while(1)
     {
         tmp = testLibFunction(tmp);
-        std::cout << __FUNCTION__ <<" : testLibFunction(tmp) = "<< tmp <<std::endl;
         sleep(2);
     }
 
@@ -37,10 +36,7 @@ void* TestPthreadFunction(void* arg)
 
 int main(int argc, char* argv[], char* envp[])
 {
-    printf("ICI ibzefbizebfibz : %p\n", &std::cout);
-    //std::cerr << "ICI ibzefbizebfibz 2" << std::endl;
-    std::cout << "ICI ibzefbizebfibz 3" << std::endl;
-    //std::cout << argv[0] << " ("<< getpid() <<") : started!" << std::endl;
+    std::cout << argv[0] << " ("<< getpid() <<") : started!" << std::endl;
 
     TestFunction();
     (void)TestFunction2();
@@ -49,11 +45,13 @@ int main(int argc, char* argv[], char* envp[])
     pthread_attr_t attr;
     pthread_attr_init(&attr);
     pthread_create(&thread, &attr, TestPthreadFunction, nullptr);
+
+    (void)testLibFunction(100);
+
     std::cout << argv[0] <<" waits for child to exit!" << std::endl;
-
-    sleep(2);
-
     pthread_join(thread, nullptr);
+
+    std::cout << "child exits" << std::endl;
 
     pthread_attr_destroy(&attr);
 

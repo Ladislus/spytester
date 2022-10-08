@@ -11,6 +11,7 @@
 #include "TracingCommand.h"
 #include "Tracer.h"
 #include "WrappedFunction.h"
+#include "WatchPoint.h"
 
 #include <string>
 #include <map>

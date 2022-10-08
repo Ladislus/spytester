@@ -6,6 +6,9 @@
 
 #include <unistd.h>
 
+
+static SpiedThread* lastCreatedThread;
+
 int main(int argc, char* argv[], char* envp[])
 {
     if(argc<2)
@@ -17,6 +20,11 @@ int main(int argc, char* argv[], char* envp[])
     try{
         SpiedProgram prog(argv[1], argc-1, argv[1], envp[0]);
 
+        prog.setOnThreadStart([](SpiedThread& sp) {
+            lastCreatedThread = &sp;
+        });
+
+
         BreakPoint* bp = prog.createBreakPoint("TestFunction2");
         if(bp != nullptr)
         {
@@ -24,22 +32,37 @@ int main(int argc, char* argv[], char* envp[])
             bp->setOnHitCallback([](BreakPoint& bp, SpiedThread& sp){bp.resumeAndSet(sp);});
         }
 
-        sleep(1);
-
         prog.run();
 
         sleep(1);
 
         auto f = prog.createWrappedFunction("TestProgram", testLibFunction);
-        f->set([](int a){std::cout<< "HELLO!" <<std::endl; return a+2;});
+        f->set([](int a){
+            std::cout<< "HELLO!" <<std::endl;
+            testLibFunction(a);
+            return a+2;
+        });
 
         prog.run();
 
-        sleep(5);
+        sleep(3);
+
+        prog.stop();
+
+        if(lastCreatedThread != nullptr)
+        {
+            WatchPoint* wp = lastCreatedThread->createWatchPoint();
+            wp->setOnHit([](WatchPoint& wp, SpiedThread& sp){
+                            sp.resume();
+                         });
+            wp->set((void*)&b, WatchPoint::READ_WRITE, WatchPoint::_4BYTES);
+        }
+
+        prog.run();
+
+        sleep(10);
 
         prog.terminate();
-
-        sleep(100);
     }
     catch(const std::invalid_argument& e){
         sleep(10);

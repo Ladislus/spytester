@@ -4,7 +4,7 @@ enable_language(C ASM)
 set(CMAKE_CXX_STANDARD 17)
 
 add_library(TestLib SHARED cmake-build-debug/Testing/TestLib.cpp cmake-build-debug/Testing/TestLib.h)
-add_library(SpyTester SHARED SpiedProgram.cpp utils.S SpiedProgram.h SpiedThread.cpp SpiedThread.h Tracer.cpp Tracer.h Breakpoint.cpp Breakpoint.h TracingCommand.h WrappedFunction.h cmake-build-debug/Testing/TestLib.cpp cmake-build-debug/Testing/TestLib.h)
+add_library(SpyTester SHARED SpiedProgram.cpp utils.S SpiedProgram.h SpiedThread.cpp SpiedThread.h Tracer.cpp Tracer.h Breakpoint.cpp Breakpoint.h TracingCommand.h WrappedFunction.h cmake-build-debug/Testing/TestLib.cpp cmake-build-debug/Testing/TestLib.h WatchPoint.cpp WatchPoint.h)
 target_link_libraries(SpyTester dl pthread)
 set_target_properties(SpyTester PROPERTIES BUILD_RPATH_USE_ORIGIN TRUE)
 set_target_properties(SpyTester PROPERTIES BUILD_RPATH .)

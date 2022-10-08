@@ -72,7 +72,7 @@ void BreakPoint::prepareToResume(SpiedThread& spiedThread)
 
 void BreakPoint::resumeAndSet(SpiedThread &spiedThread)
 {
-    if(!spiedThread.isRunning()){
+    if(spiedThread.getState() == SpiedThread::STOPPED){
         if(_tracer.isTracerThread())
         {
             prepareToResume(spiedThread);
@@ -93,7 +93,7 @@ void BreakPoint::resumeAndSet(SpiedThread &spiedThread)
 
 
 void BreakPoint::resumeAndUnset(SpiedThread &spiedThread) {
-    if(!spiedThread.isRunning()){
+    if(spiedThread.getState() == SpiedThread::STOPPED){
         if(_tracer.isTracerThread()) {
             prepareToResume(spiedThread);
             unset();

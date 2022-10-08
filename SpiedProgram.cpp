@@ -57,8 +57,8 @@ SpiedProgram::SpiedProgram(std::string&& progName, int argc, char* argv, char* e
 }
 
 SpiedProgram::~SpiedProgram(){
-    std::cout << __FUNCTION__ << std::endl;
     delete _tracer;
+    std::cout << __FUNCTION__ << std::endl;
 }
 
 void SpiedProgram::terminate() {
@@ -78,20 +78,8 @@ void SpiedProgram::stop(){
 void SpiedProgram::run() {
     for(auto & spiedThread : _spiedThreads)
     {
-        spiedThread->resume(0);
+        spiedThread->resume();
     }
-}
-
-BreakPoint* SpiedProgram::createBreakPoint(std::string &&symbName) {
-    void *addr = dlsym(_handle, symbName.c_str());
-
-    if (addr == nullptr) {
-        std::cerr << __FUNCTION__ << " : dlsym failed for "
-                  << symbName << " : " << dlerror() << std::endl;
-        return nullptr;
-    }
-
-    return createBreakPoint(addr, std::move(symbName));
 }
 
 ProgParam *SpiedProgram::getProgParam() {
@@ -106,11 +94,22 @@ char *SpiedProgram::getStackTop() {
     return (char*)_stack+stackSize;
 }
 
-
 // Exec Breakpoint Management
 BreakPoint *SpiedProgram::createBreakPoint(void *addr, std::string &&name) {
     _breakPoints.emplace_back(std::make_unique<BreakPoint>(*_tracer, std::move(name), addr));
     return _breakPoints.back().get();
+}
+
+BreakPoint* SpiedProgram::createBreakPoint(std::string &&symbName) {
+    void *addr = dlsym(_handle, symbName.c_str());
+
+    if (addr == nullptr) {
+        std::cerr << __FUNCTION__ << " : dlsym failed for "
+                  << symbName << " : " << dlerror() << std::endl;
+        return nullptr;
+    }
+
+    return createBreakPoint(addr, std::move(symbName));
 }
 
 BreakPoint *SpiedProgram::getBreakPointAt(void* addr) {
