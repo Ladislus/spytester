@@ -45,23 +45,19 @@ private:
 
     void(*_onThreadStart)(SpiedThread& spiedThread);
     void(*_onThreadExit)(SpiedThread& spiedThread);
-    SpiedThread * onThreadStart(pid_t tid);
-    void onThreadExit(pid_t tid);
+    SpiedThread& getSpiedThread(pid_t tid);
 
 public:
-
     SpiedProgram(std::string &&progName, int argc, char *argv, char *envp);
-    ~SpiedProgram();
 
-    SpiedThread* getSpiedThread(pid_t tid);
+    ~SpiedProgram();
     void setOnThreadStart(void(*onAddThread)(SpiedThread&) );
-    void setOnThreadExit(void(*onThreadExit)(SpiedThread&) );
 
     ProgParam* getProgParam();
     const std::string& getProgName();
     char* getStackTop();
 
-    BreakPoint *getBreakPointAt(void* addr);
+    BreakPoint* getBreakPointAt(void* addr);
     BreakPoint* createBreakPoint(std::string&& symbName);
     BreakPoint* createBreakPoint(void* addr,
                                  std::string&& name = "BreakPoint" + std::to_string(breakPointCounter));
@@ -69,7 +65,8 @@ public:
     template<typename TRET, typename ... ARGS>
     WrappedFunction<TRET, ARGS ...>* createWrappedFunction(std::string&& binName, TRET (*function)(ARGS ...));
 
-    void run();
+    void start();
+    void resume();
     void stop();
     void terminate();
 };

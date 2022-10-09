@@ -40,7 +40,7 @@ template<typename TRET, typename... TARGS>
 void WrappedFunction<TRET, TARGS...>::set(TRET (*wrapper)(TARGS...)) {
     if(_wrapper != wrapper) {
         if (_tracer.isTracerThread()) {
-            if (ptrace(PTRACE_POKEDATA, _tracer.getMainTid(), _gotAddr, wrapper) == -1) {
+            if (ptrace(PTRACE_POKEDATA, _tracer.getTraceePid(), _gotAddr, wrapper) == -1) {
                 std::cout << __FUNCTION__ << " : PTRACE_POKEDATA failed : " << strerror(errno) << std::endl;
             } else {
                 _wrapper = wrapper;

@@ -24,7 +24,6 @@ int main(int argc, char* argv[], char* envp[])
             lastCreatedThread = &sp;
         });
 
-
         BreakPoint* bp = prog.createBreakPoint("TestFunction2");
         if(bp != nullptr)
         {
@@ -32,7 +31,7 @@ int main(int argc, char* argv[], char* envp[])
             bp->setOnHitCallback([](BreakPoint& bp, SpiedThread& sp){bp.resumeAndSet(sp);});
         }
 
-        prog.run();
+        prog.start();
 
         sleep(1);
 
@@ -43,7 +42,7 @@ int main(int argc, char* argv[], char* envp[])
             return a+2;
         });
 
-        prog.run();
+        prog.resume();
 
         sleep(3);
 
@@ -58,7 +57,7 @@ int main(int argc, char* argv[], char* envp[])
             wp->set((void*)&b, WatchPoint::READ_WRITE, WatchPoint::_4BYTES);
         }
 
-        prog.run();
+        prog.resume();
 
         sleep(10);
 

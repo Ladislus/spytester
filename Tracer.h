@@ -23,42 +23,53 @@ extern "C" {
 };
 
 class Tracer {
+    typedef enum {
+        NOT_STARTED,
+        STARTING,
+        TRACING,
+        STOPPING,
+        STOPPED,
+    } E_State;
+
     static const size_t stackSize;
 
     static int starter(void* param);
-    static int tracerMain(void* tracer);
+    static int commandHandler(void* tracer);
     static int eventHandler(void* tracer);
 
     SpiedProgram& _spiedProgram;
-    pid_t _tracerPid;
     pid_t _tracerTid;
-    pid_t _mainPid;
-    void* _cmdrStack;
-    void* _waitrStack;
+    pid_t _traceePid;
+    void* _evtHandlerStack;
+    void* _cmdHandlerStack;
 
-    bool _isTracing;
-    std::mutex _tracingMutex;
-    std::condition_variable _tracingCV;
+    volatile E_State _state;
+    std::mutex _stateMutex;
+    std::condition_variable _stateCV;
 
     sem_t _cmdsSem;
     std::mutex _cmdsMutex;
     std::queue<std::unique_ptr<Command>> _commands;
 
-    using HandleSigTrapCmd = TracingCommand<Tracer, SpiedThread&>;
+    void setState(E_State state);
 
+    void initTracer();
+    void handleCommand();
+    void handleEvent();
+
+    using TracerCmd = TracingCommand<Tracer>;
 public :
     explicit Tracer(SpiedProgram& spiedProgram);
 
     ~Tracer();
+
+    void start();
+
     void command(std::unique_ptr<Command> cmd);
 
-    pid_t getMainTid() const;
+    pid_t getTraceePid() const;
 
     bool isTracerThread() const;
-
-    void handleCommand();
-
-    void handleEvent();
 };
 
 

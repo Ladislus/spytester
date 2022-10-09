@@ -3,6 +3,7 @@
 #include <sys/ptrace.h>
 #include <cstring>
 #include <unistd.h>
+#include <sys/uio.h>
 #include "Breakpoint.h"
 
 BreakPoint::BreakPoint(Tracer& tracer, const std::string &&name, void *addr) :
@@ -21,8 +22,8 @@ void BreakPoint::set()
             _backup = *_addr;
             uint64_t newWord = (_backup & (~0xFF)) | INT3;
 
-            if (ptrace(PTRACE_POKEDATA, _tracer.getMainTid(), _addr, newWord) == -1) {
-                std::cout << __FUNCTION__ << " : PTRACE_POKEDATA failed : " << strerror(errno) << std::endl;
+            if (ptrace(PTRACE_POKEDATA, _tracer.getTraceePid(), _addr, newWord) == -1) {
+                std::cerr << __FUNCTION__ << " : PTRACE_POKEDATA failed : " << strerror(errno) << std::endl;
             } else {
                 std::cout << __FUNCTION__ << " : breakpoint (" << _name << ") set" << std::endl;
                 _isSet = true;
@@ -40,7 +41,7 @@ void BreakPoint::unset()
     if(_isSet)
     {
         if(_tracer.isTracerThread()) {
-            if (ptrace(PTRACE_POKEDATA, _tracer.getMainTid(), _addr, _backup) == -1) {
+            if (ptrace(PTRACE_POKEDATA, _tracer.getTraceePid(), _addr, _backup) == -1) {
                 std::cerr << __FUNCTION__ << " : PTRACE_POKEDATA failed : " << strerror(errno) << std::endl;
             } else {
                 std::cout << __FUNCTION__ << " : breakpoint (" << _name << ") unset" << std::endl;

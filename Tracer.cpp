@@ -22,8 +22,6 @@ int Tracer::starter(void *param) {
         std::exit(1);
     }
 
-    std::cout << __FUNCTION__ << " : start ! : " << getpid() << std::endl;
-
     if( raise(SIGTRAP) != 0)
     {
         std::cerr<<__FUNCTION__<<" : ptrace failed : " << strerror(errno) << std::endl;
@@ -35,43 +33,28 @@ int Tracer::starter(void *param) {
     return 0;
 }
 
-int Tracer::tracerMain(void * tracer) {
+int Tracer::commandHandler(void * tracer) {
     auto t = (Tracer*) tracer;
-    SpiedProgram& s = t->_spiedProgram;
 
-    t->_mainPid = clone(starter, s.getStackTop(),
-                        CLONE_FS | CLONE_VM | CLONE_FILES | SIGCHLD, s.getProgParam());
-    if(t->_mainPid == -1)
+    if(t == nullptr)
     {
-        std::cerr << __FUNCTION__ <<" : clone failed : "<< strerror(errno) <<std::endl;
+        std::cerr << __FUNCTION__ << " : unexpected pid " << getpid() << std::endl;
+        return 1;
+    }
+    t->initTracer();
+    t->handleCommand();
+
+    return 0;
+}
+
+int Tracer::eventHandler(void* tracer) {
+    auto t = (Tracer *) tracer;
+    if (t == nullptr) {
+        std::cerr << __FUNCTION__ << " : unexpected pid " << getpid() << std::endl;
         return 1;
     }
 
-    int wstatus;
-    if(waitpid(t->_mainPid, &wstatus, 0) == -1)
-    {
-        std::cerr << "waitpid failed : " << strerror(errno) << std::endl;
-    }
-
-    if (WIFSTOPPED(wstatus)){
-        if(ptrace(PTRACE_SETOPTIONS, t->_mainPid, NULL, PTRACE_O_TRACECLONE) == -1)
-        {
-            std::cerr << __FUNCTION__ <<" : PTRACE_O_TRACECLONE failed : "<< strerror(errno) <<std::endl;
-        }
-        else
-        {
-            (void) t->_spiedProgram.onThreadStart(t->_mainPid);
-            std::cout<< __FUNCTION__ <<" : "<< s.getProgName() <<" ready to run!" << std::endl;
-        }
-    }
-
-    if (clone(eventHandler, (char *) t->_cmdrStack + stackSize,
-              CLONE_FS | CLONE_VM | CLONE_FILES | CLONE_SIGHAND | CLONE_THREAD, t) == -1)
-    {
-        std::cerr << __FUNCTION__ <<" : failed to clone eventHandler : " << strerror(errno) << std::endl;
-    }
-
-    t->handleCommand();
+    t->handleEvent();
 
     return 0;
 }
@@ -84,77 +67,58 @@ void Tracer::handleEvent() {
     // Wait until all child threads exit
     while((tid = waitpid(-1, &wstatus, WCONTINUED)) > 0)
     {
-        SpiedThread* thread = _spiedProgram.getSpiedThread(tid);
+        SpiedThread& thread = _spiedProgram.getSpiedThread(tid);
 
-        if(thread == nullptr)
-        {
-            std::cout << __FUNCTION__ << " : new thread " << tid <<" detected!"<<std::endl;
-            thread = _spiedProgram.onThreadStart(tid);
-        }
-
-        if(WIFSTOPPED(wstatus))
-        {
-            thread->setState(SpiedThread::STOPPED);
+        if(WIFSTOPPED(wstatus)){
+            thread.setState(SpiedThread::STOPPED);
             int signum = WSTOPSIG(wstatus);
             std::cout << __FUNCTION__ << " : thread " << tid <<" stopped : SIG = " << signum<< std::endl;
             switch(signum)
             {
                 case SIGTRAP:
-                    thread->handleSigTrap();
+                    thread.handleSigTrap();
                     break;
                 case SIGSTOP:
                     break;
                 default:
-                    thread->resume(signum);
+                    thread.resume(signum);
                     break;
             }
         }
         else if(WIFCONTINUED(wstatus))
         {
-            thread->setState(SpiedThread::RUNNING);
+            thread.setState(SpiedThread::RUNNING);
             std::cout << __FUNCTION__  <<" : thread " << tid <<" resumed!" << std::endl;
         }
         else if(WIFEXITED(wstatus))
         {
-            thread->setState(SpiedThread::TERMINATED);
+            thread.setState(SpiedThread::TERMINATED);
             std::cout << __FUNCTION__ <<" : thread "<< tid <<" exits with code "<<WEXITSTATUS(wstatus)<<std::endl;
         }
         else if(WIFSIGNALED(wstatus))
         {
-            thread->setState(SpiedThread::TERMINATED);
+            thread.setState(SpiedThread::TERMINATED);
             std::cout << __FUNCTION__<<" : thread "<< tid <<" exits with signal "<<WTERMSIG(wstatus)<<std::endl;
         }
     }
 
-    _isTracing = false;
-    sem_post(&_cmdsSem);
+    setState(STOPPING);
     std::cout << __FUNCTION__ << ": stop handling events!" << std::endl;
-}
 
-int Tracer::eventHandler(void* tracer) {
-    auto t = (Tracer *) tracer;
-    if (t == nullptr) {
-        std::cerr << __FUNCTION__ << " : unexpected pid " << getpid() << std::endl;
-        return 1;
-    } else {
-        t->handleEvent();
-    }
-
-    return 0;
+    // Wakeup command handler
+    sem_post(&_cmdsSem);
 }
 
 void Tracer::handleCommand() {
-    //Get next command to execute
     std::cout << __FUNCTION__ << " : start handling commands!" << std::endl;
-    _tracerTid = gettid();
+    setState(STARTING);
 
-    _tracingMutex.lock();
-
-    while(_isTracing)
+    while(_state != STOPPING)
     {
         if(sem_wait(&_cmdsSem) != 0)
             break;
 
+        //Get next command to execute
         _cmdsMutex.lock();
         if(!_commands.empty()) {
             auto cmd = std::move(_commands.front());
@@ -168,41 +132,40 @@ void Tracer::handleCommand() {
         }
     }
     std::cout << __FUNCTION__ << " : stop handling commands!" << std::endl;
-
-    _tracingMutex.unlock();
-    _tracingCV.notify_all();
+    setState(STOPPED);
 }
 
 Tracer::Tracer(SpiedProgram &spiedProgram)
-:_spiedProgram(spiedProgram), _isTracing(true)
+: _spiedProgram(spiedProgram), _state(NOT_STARTED)
 {
-    if(sem_init(&_cmdsSem, 0, 0) == -1)
-    {
+    if(sem_init(&_cmdsSem, 0, 0) == -1){
         std::cerr << __FUNCTION__ << " : semaphore initialization failed : " << strerror(errno) << std::endl;
         throw std::invalid_argument("invalid sem init");
     }
 
-    _cmdrStack = mmap(nullptr, stackSize, PROT_READ | PROT_WRITE,
+    _evtHandlerStack = mmap(nullptr, stackSize, PROT_READ | PROT_WRITE,
                       MAP_PRIVATE | MAP_ANONYMOUS | MAP_STACK, -1, 0);
-    if (_cmdrStack == MAP_FAILED) {
+    if (_evtHandlerStack == MAP_FAILED) {
         std::cerr << __FUNCTION__ << " : stack allocation failed : " << strerror(errno) << std::endl;
         throw std::invalid_argument("Cannot allocate stack");
     }
-    _waitrStack = mmap(nullptr, stackSize, PROT_READ | PROT_WRITE,
+    _cmdHandlerStack = mmap(nullptr, stackSize, PROT_READ | PROT_WRITE,
                         MAP_PRIVATE | MAP_ANONYMOUS | MAP_STACK, -1, 0);
-    if (_waitrStack == MAP_FAILED) {
+    if (_cmdHandlerStack == MAP_FAILED) {
         std::cerr << __FUNCTION__ << " : stack allocation failed : " << strerror(errno) << std::endl;
         throw std::invalid_argument("Cannot allocate stack");
     }
 
-    char* stackTop = (char *) _waitrStack + stackSize;
-    _tracerPid = clone(tracerMain, stackTop,
-                 CLONE_FS | CLONE_VM | CLONE_FILES, this);
-    if(_tracerPid == -1)
-    {
+    std::unique_lock lk(_stateMutex);
+
+    char* stackTop = (char *) _cmdHandlerStack + stackSize;
+    if(clone(commandHandler, stackTop, CLONE_FS | CLONE_VM | CLONE_FILES, this) == -1){
         std::cerr << __FUNCTION__ << " : clone failed : " << strerror(errno) << std::endl;
         throw std::invalid_argument("Cannot launch _tracer thread");
     }
+
+    // Wait for tracer threads to be started and ready to handle commands and events
+    _stateCV.wait(lk, [this]{return _state == STARTING;});
 }
 
 void Tracer::command(std::unique_ptr<Command> cmd) {
@@ -216,20 +179,67 @@ void Tracer::command(std::unique_ptr<Command> cmd) {
 }
 
 Tracer::~Tracer() {
-    std::unique_lock lk(_tracingMutex);
-    if(_isTracing){
+    std::unique_lock lk(_stateMutex);
+    if(_state != STOPPED){
         // wait for tracing to be stopped
-        _tracingCV.wait(lk, [this](){return !_isTracing;});
+        _stateCV.wait(lk, [this](){return _state==STOPPED;});
     }
 
     sem_destroy(&_cmdsSem);
+    // TODO munmap not safe : evtHandler/cmdHandler may not be completely terminated
+    munmap(_evtHandlerStack, stackSize);
+    munmap(_cmdHandlerStack, stackSize);
     std::cout<< __FUNCTION__ << std::endl;
 }
 
-pid_t Tracer::getMainTid() const {
-    return _mainPid;
+pid_t Tracer::getTraceePid() const {
+    return _traceePid;
 }
 
 bool Tracer::isTracerThread() const {
     return gettid() == _tracerTid;
+}
+
+void Tracer::setState(Tracer::E_State state) {
+    _stateMutex.lock();
+    _state = state;
+    _stateMutex.unlock();
+    _stateCV.notify_all();
+}
+
+void Tracer::start() {
+    if(_state == STARTING) {
+        setState(TRACING);
+        SpiedThread& sp  = _spiedProgram.getSpiedThread(_traceePid);
+        sp.resume();
+    }
+    else{
+        std::cout << __FUNCTION__ << " : tracer has already been started " << std::endl;
+    }
+}
+
+void Tracer::initTracer() {
+    _traceePid = clone(starter, _spiedProgram.getStackTop(),
+                       CLONE_FS | CLONE_VM | CLONE_FILES | SIGCHLD, _spiedProgram.getProgParam());
+    if(_traceePid == -1){
+        std::cerr << __FUNCTION__ <<" : clone failed : "<< strerror(errno) <<std::endl;
+        return;
+    }
+
+    int wstatus;
+    if(waitpid(_traceePid, &wstatus, 0) == -1){
+        std::cerr << "waitpid failed : " << strerror(errno) << std::endl;
+    }
+    if (WIFSTOPPED(wstatus)){
+        if(ptrace(PTRACE_SETOPTIONS, _traceePid, NULL, PTRACE_O_TRACECLONE) == -1){
+            std::cerr << __FUNCTION__ <<" : PTRACE_O_TRACECLONE failed : "<< strerror(errno) <<std::endl;
+        }
+    }
+
+    _tracerTid = gettid();
+
+    if (clone(eventHandler, (char *) _evtHandlerStack + stackSize,
+              CLONE_FS | CLONE_VM | CLONE_FILES | CLONE_SIGHAND | CLONE_THREAD, this) == -1){
+        std::cerr << __FUNCTION__ <<" : failed to clone eventHandler : " << strerror(errno) << std::endl;
+    }
 }

@@ -3,8 +3,6 @@
 #include <dlfcn.h>
 #include <sys/mman.h>
 
-
-#include <unistd.h>
 #include <cstring>
 #include <iostream>
 
@@ -52,8 +50,6 @@ SpiedProgram::SpiedProgram(std::string&& progName, int argc, char* argv, char* e
     }
 
     _tracer = new Tracer(*this);
-
-    sleep(1); // #TODO create synchronisation with _tracer
 }
 
 SpiedProgram::~SpiedProgram(){
@@ -61,10 +57,14 @@ SpiedProgram::~SpiedProgram(){
     std::cout << __FUNCTION__ << std::endl;
 }
 
-void SpiedProgram::terminate() {
+void SpiedProgram::start() {
+    _tracer->start();
+}
+
+void SpiedProgram::resume() {
     for(auto & spiedThread : _spiedThreads)
     {
-        spiedThread->terminate();
+        spiedThread->resume();
     }
 }
 
@@ -75,10 +75,9 @@ void SpiedProgram::stop(){
     }
 }
 
-void SpiedProgram::run() {
-    for(auto & spiedThread : _spiedThreads)
-    {
-        spiedThread->resume();
+void SpiedProgram::terminate() {
+    for(auto & spiedThread : _spiedThreads){
+        spiedThread->terminate();
     }
 }
 
@@ -115,8 +114,7 @@ BreakPoint* SpiedProgram::createBreakPoint(std::string &&symbName) {
 BreakPoint *SpiedProgram::getBreakPointAt(void* addr) {
     BreakPoint* bp = nullptr;
 
-    for(auto &breakPoint : _breakPoints)
-    {
+    for(auto &breakPoint : _breakPoints){
         if(breakPoint->getAddr() == addr){
             bp = breakPoint.get();
         }
@@ -126,43 +124,29 @@ BreakPoint *SpiedProgram::getBreakPointAt(void* addr) {
 }
 
 // Thread Management
-SpiedThread *SpiedProgram::getSpiedThread(pid_t tid) {
+SpiedThread &SpiedProgram::getSpiedThread(pid_t tid) {
     SpiedThread *spiedThread = nullptr;
 
+    // Search thread
     for (auto &ptr: _spiedThreads) {
         if (tid == ptr->getTid()) {
             spiedThread = ptr.get();
             break;
         }
     }
-    return spiedThread;
+
+    // Register new thread
+    if(spiedThread == nullptr){
+        _spiedThreads.emplace_back(std::make_unique<SpiedThread>(*this, *_tracer, tid));
+        _onThreadStart(*_spiedThreads.back());
+        spiedThread = _spiedThreads.back().get();
+    }
+
+    return *spiedThread;
 }
 
 void SpiedProgram::setOnThreadStart(void(*onThreadStart)(SpiedThread &)) {
     _onThreadStart = onThreadStart;
-}
-
-void SpiedProgram::setOnThreadExit(void (*onThreadExit)(SpiedThread &)) {
-    _onThreadExit = onThreadExit;
-}
-
-SpiedThread *SpiedProgram::onThreadStart(pid_t tid) {
-    _spiedThreads.emplace_back(std::make_unique<SpiedThread>(*this, *_tracer, tid));
-    _onThreadStart(*_spiedThreads.back());
-    return _spiedThreads.back().get();
-}
-
-void SpiedProgram::onThreadExit(pid_t tid) {
-    auto it = _spiedThreads.begin();
-    for (; it != _spiedThreads.end(); it++) {
-        if ((*it)->getTid() == tid) break;
-    }
-
-    if (it != _spiedThreads.end()) {
-        _onThreadExit(**it);
-    } else {
-        std::cerr << __FUNCTION__ << " : unknown thread " << tid << std::endl;
-    }
 }
 
 
