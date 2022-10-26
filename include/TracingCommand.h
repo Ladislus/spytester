@@ -1,7 +1,3 @@
-//
-// Created by baptiste on 17/09/22.
-//
-
 #ifndef SPYTESTER_TRACINGCOMMAND_H
 #define SPYTESTER_TRACINGCOMMAND_H
 

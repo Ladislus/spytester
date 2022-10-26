@@ -1,4 +1,4 @@
-#include "../../SpiedProgram.h"
+#include "../../include/SpiedProgram.h"
 #include "TestLib.h"
 
 #include <iostream>

@@ -1,10 +1,6 @@
-//
-// Created by baptiste on 04/10/22.
-//
-
-#include "WatchPoint.h"
-#include "Tracer.h"
-#include "SpiedThread.h"
+#include "../include/WatchPoint.h"
+#include "../include/Tracer.h"
+#include "../include/SpiedThread.h"
 
 #include <sys/ptrace.h>
 #include <sys/user.h>

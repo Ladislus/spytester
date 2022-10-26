@@ -1,4 +1,4 @@
-#include "SpiedProgram.h"
+#include "../include/SpiedProgram.h"
 
 #include <dlfcn.h>
 #include <sys/mman.h>

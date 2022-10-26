@@ -3,8 +3,8 @@
 #include <sys/ptrace.h>
 #include <cstring>
 #include <unistd.h>
-#include <sys/uio.h>
-#include "Breakpoint.h"
+
+#include "../include/Breakpoint.h"
 
 BreakPoint::BreakPoint(Tracer& tracer, const std::string &&name, void *addr) :
 _addr((uint64_t *)addr), _name(name), _isSet(false), _tracer(tracer),_onHit(BreakPoint::defaultOnHit){}
@@ -36,12 +36,12 @@ void BreakPoint::set()
 }
 
 
-void BreakPoint::unset()
+void BreakPoint::unset(SpiedThread& sp)
 {
     if(_isSet)
     {
         if(_tracer.isTracerThread()) {
-            if (ptrace(PTRACE_POKEDATA, _tracer.getTraceePid(), _addr, _backup) == -1) {
+            if (ptrace(PTRACE_POKEDATA, sp.getTid(), _addr, _backup) == -1) {
                 std::cerr << __FUNCTION__ << " : PTRACE_POKEDATA failed : " << strerror(errno) << std::endl;
             } else {
                 std::cout << __FUNCTION__ << " : breakpoint (" << _name << ") unset" << std::endl;
@@ -49,7 +49,7 @@ void BreakPoint::unset()
             }
         }
         else{
-            _tracer.command(std::make_unique<BreakPointCmd>(*this, &BreakPoint::unset));
+            _tracer.command(std::make_unique<UnsetCmd>(*this, &BreakPoint::unset, sp));
         }
     }
 }
@@ -77,10 +77,10 @@ void BreakPoint::resumeAndSet(SpiedThread &spiedThread)
         if(_tracer.isTracerThread())
         {
             prepareToResume(spiedThread);
-            unset();
+            unset(spiedThread);
             spiedThread.singleStep();
             set();
-            spiedThread.resume(0);
+            spiedThread.resume();
         }
         else
         {
@@ -97,8 +97,8 @@ void BreakPoint::resumeAndUnset(SpiedThread &spiedThread) {
     if(spiedThread.getState() == SpiedThread::STOPPED){
         if(_tracer.isTracerThread()) {
             prepareToResume(spiedThread);
-            unset();
-            spiedThread.resume(0);
+            unset(spiedThread);
+            spiedThread.resume();
         }
         else
         {
@@ -110,8 +110,8 @@ void BreakPoint::resumeAndUnset(SpiedThread &spiedThread) {
     }
 }
 
-void BreakPoint::setOnHitCallback(void (*onHit)(BreakPoint &, SpiedThread &)) {
-    _onHit = onHit;
+void BreakPoint::setOnHitCallback(std::function<void (BreakPoint&, SpiedThread&)>&& callback) {
+    _onHit = callback;
 }
 
 void BreakPoint::defaultOnHit(BreakPoint& breakPoint, SpiedThread& spiedThread) {

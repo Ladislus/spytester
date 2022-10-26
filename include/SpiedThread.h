@@ -30,13 +30,16 @@ public:
     E_State getState();
     void setState(E_State state);
 
-    void handleSigTrap();
+    void handleSigTrap(int wstatus);
     void handleSigStop();
 
     void resume(int signum = 0);
     void singleStep();
     void stop();
     void terminate();
+
+    void backtrace();
+    void detach();
 
     WatchPoint* createWatchPoint();
     void deleteWatchPoint(WatchPoint* watchPoint);
@@ -56,6 +59,7 @@ private:
     using SpiedThreadCmd = TracingCommand<SpiedThread>;
 
     using ResumeCmd = TracingCommand<SpiedThread, int>;
+    using HandleSigTrapCmd = TracingCommand<SpiedThread, int>;
 };
 
 

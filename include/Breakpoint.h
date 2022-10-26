@@ -24,12 +24,13 @@ class BreakPoint {
     void prepareToResume(SpiedThread& spiedThread);
 
     // callback function
-    void(*_onHit)(BreakPoint&, SpiedThread&);
+    std::function<void (BreakPoint&, SpiedThread&)> _onHit;
 
     // default callback function
     static void defaultOnHit(BreakPoint& breakPoint, SpiedThread& spiedThread);
     using BreakPointCmd = TracingCommand<BreakPoint>;
 
+    using UnsetCmd = TracingCommand<BreakPoint, SpiedThread&>;
     using ResumeCmd = TracingCommand<BreakPoint, SpiedThread&>;
 public:
     BreakPoint(Tracer& tracer, const std::string&& name, void* addr);
@@ -39,9 +40,9 @@ public:
     void* getAddr() const;
 
     void set();
-    void unset();
+    void unset(SpiedThread& sp);
 
-    void setOnHitCallback(void (*onHit)(BreakPoint&, SpiedThread&));
+    void setOnHitCallback(std::function<void (BreakPoint&, SpiedThread&)>&& callback);
     void hit(SpiedThread& spiedThread);
 
     void resumeAndUnset(SpiedThread &spiedThread);

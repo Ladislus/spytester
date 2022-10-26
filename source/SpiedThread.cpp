@@ -1,7 +1,7 @@
-#include "SpiedThread.h"
-#include "Tracer.h"
-#include "Breakpoint.h"
-#include "SpiedProgram.h"
+#include "../include/SpiedThread.h"
+#include "../include/Tracer.h"
+#include "../include/Breakpoint.h"
+#include "../include/SpiedProgram.h"
 
 #include <sys/ptrace.h>
 
@@ -53,12 +53,13 @@ void SpiedThread::resume(int signum) {
     {
         if(_tracer.isTracerThread())
         {
+            setState(RUNNING);
             if(ptrace(PTRACE_CONT, _tid, nullptr, signum) == -1) {
+                setState(STOPPED);
                 std::cerr << __FUNCTION__ << " : PTRACE_CONT failed for " << _tid << " : " << strerror(errno) << std::endl;
             }
             else{
                 std::cout << __FUNCTION__ << " : thread "<<_tid << " resumed"<< std::endl;
-                setState(RUNNING);
             }
         }
         else
@@ -139,11 +140,24 @@ void SpiedThread::terminate() {
     }
 }
 
-void SpiedThread::handleSigTrap() {
+void SpiedThread::handleSigTrap(int wstatus) {
     if(!_isSigTrapExpected) {
         struct user_regs_struct regs;
 
         if (_tracer.isTracerThread()) {
+
+            // Handle thread creation
+            if((wstatus >> 16) == PTRACE_EVENT_CLONE){
+
+                unsigned long newThread;
+                ptrace(PTRACE_GETEVENTMSG, _tid, nullptr, &newThread);
+
+                std::cout << __FUNCTION__ << " : thread "<<_tid <<" create new thread "
+                << newThread << std::endl;
+
+                resume();
+                return;
+            }
 
             // Handle breakpoint
             if (ptrace(PTRACE_GETREGS, _tid, NULL, &regs)) {
@@ -194,9 +208,10 @@ void SpiedThread::handleSigTrap() {
                 std::cout << __FUNCTION__ << " : SIGTRAP at " << info.dli_sname << " (" << info.dli_fname
                           << ") for " << _tid << std::endl;
             }
+            resume();
 
         } else {
-            _tracer.command(std::make_unique<SpiedThreadCmd>(*this, &SpiedThread::handleSigTrap));
+            _tracer.command(std::make_unique<HandleSigTrapCmd>(*this, &SpiedThread::handleSigTrap, wstatus));
         }
     }
     else
@@ -225,6 +240,75 @@ void SpiedThread::deleteWatchPoint(WatchPoint *watchPoint) {
             wp.second = false;
             break;
         }
+    }
+}
+
+void SpiedThread::backtrace() {
+    if(_tracer.isTracerThread())
+    {
+        // Get register
+        struct user_regs_struct regs;
+        if (ptrace(PTRACE_GETREGS, _tid, NULL, &regs) == -1) {
+            std::cerr << __FUNCTION__ << ": PTRACE_GETREGS failed for thread "
+                      << _tid << std::endl;
+            return;
+        }
+
+        // Get thread current position
+        Dl_info info;
+        if (dladdr((void *)regs.rip, &info) == 0) {
+            std::cout << __FUNCTION__ << " : thread " << _tid <<" at "<< (void *)regs.rip <<std::endl;
+        }
+        else{
+            if(info.dli_sname != nullptr) {
+                std::cout << __FUNCTION__ << " : thread " << _tid << " at " << info.dli_sname << " ("
+                          << info.dli_fname << ")" << std::endl;
+            }
+            else{
+                std::cout << "thread " << _tid << " at "<< (void *)regs.rip
+                          << " (" << info.dli_fname << ")" << std::endl;
+                return;
+            }
+        }
+
+        // Get call stack
+        auto rbp = (uint64_t*)regs.rbp;
+        while(rbp != nullptr)
+        {
+            uint64_t retAddr = *(rbp+1);
+            rbp = (uint64_t *)(*rbp);
+
+            if (dladdr((void *)retAddr, &info) == 0) {
+                break;
+            }
+            else {
+                if(info.dli_sname != nullptr) {
+                    std::cout << "\tfrom " << info.dli_sname << " (" << info.dli_fname << ")" << std::endl;
+                }
+                else{
+                    std::cout << "\tfrom ?? ("<< (void*)retAddr <<") (" << info.dli_fname << ")" << std::endl;
+                }
+            }
+        }
+    }
+    else
+    {
+        _tracer.command(std::make_unique<SpiedThreadCmd>(*this, &SpiedThread::backtrace));
+    }
+}
+
+void SpiedThread::detach() {
+    if(_tracer.isTracerThread()) {
+        if(ptrace(PTRACE_DETACH, _tid, 0, 0) == -1){
+            std::cerr<< __FUNCTION__ <<" : PTRACE_DETACH failed for thread "<< _tid << " : "
+            << strerror(errno) << std::endl;
+        }
+        else
+        {
+            std::cout << __FUNCTION__ <<" : thread "<< _tid << " detached" << std::endl;
+        }
+    }else{
+        _tracer.command(std::make_unique<SpiedThreadCmd>(*this, &SpiedThread::detach));
     }
 }
 

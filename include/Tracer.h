@@ -1,7 +1,3 @@
-//
-// Created by baptiste on 13/09/22.
-//
-
 #ifndef SPYTESTER_TRACER_H
 #define SPYTESTER_TRACER_H
 
@@ -12,6 +8,7 @@
 #include <memory>
 
 #include <semaphore.h>
+#include <pthread.h>
 
 #include "SpiedThread.h"
 #include "TracingCommand.h"
@@ -31,17 +28,20 @@ class Tracer {
         STOPPED,
     } E_State;
 
-    static const size_t stackSize;
-
-    static int starter(void* param);
-    static int commandHandler(void* tracer);
-    static int eventHandler(void* tracer);
+    static int preStarter(void* param);
+    static void* starter(void* param);
+    static void * commandHandler(void* tracer);
+    static void * eventHandler(void* tracer);
 
     SpiedProgram& _spiedProgram;
     pid_t _tracerTid;
-    pid_t _traceePid;
-    void* _evtHandlerStack;
-    void* _cmdHandlerStack;
+    pid_t _starterTid;
+    pid_t _traceeTid;
+
+    pthread_attr_t _attr;
+    pthread_t _evtHandler;
+    pthread_t _cmdHandler;
+    pthread_t _starter;
 
     volatile E_State _state;
     std::mutex _stateMutex;
@@ -57,7 +57,6 @@ class Tracer {
     void handleCommand();
     void handleEvent();
 
-    using TracerCmd = TracingCommand<Tracer>;
 public :
     explicit Tracer(SpiedProgram& spiedProgram);
 
