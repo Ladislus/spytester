@@ -19,21 +19,20 @@
 template<typename TRET, typename ... TARGS>
 class WrappedFunction {
 
-    using FctType = TRET(*)(TARGS ...);
-
-    Tracer& _tracer;
-    uint64_t* _gotAddr;
-    FctType _function;
-    FctType _wrapper;
-    void* _handle;
-
-    using SetWrappedFctCmd      = TracingCommand<WrappedFunction, FctType>;
 public:
     WrappedFunction(Tracer& tracer, std::string& binName, TRET (*function)(TARGS ...));
     ~WrappedFunction();
 
     void set(TRET (*wrapper)(TARGS ...));
     void reset();
+    using FctType = TRET(*)(TARGS ...);
+
+private:
+    Tracer& _tracer;
+    uint64_t* _gotAddr;
+    FctType _function;
+    FctType _wrapper;
+    void* _handle;
 };
 
 template<typename TRET, typename... TARGS>
@@ -47,7 +46,7 @@ void WrappedFunction<TRET, TARGS...>::set(TRET (*wrapper)(TARGS...)) {
             }
         }
         else {
-            _tracer.command(std::make_unique<SetWrappedFctCmd>(*this, &WrappedFunction::set, wrapper));
+            _tracer.command(Tracer::make_unique_cmd([this, wrapper]{set(wrapper);}));
         }
     }
 }

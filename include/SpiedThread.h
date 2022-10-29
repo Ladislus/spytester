@@ -5,7 +5,6 @@
 #include <csignal>
 #include <mutex>
 #include <condition_variable>
-#include "TracingCommand.h"
 #include "WatchPoint.h"
 
 class Tracer;
@@ -56,10 +55,6 @@ private:
     Tracer& _tracer;
 
     SpiedProgram& _spiedProgram;
-    using SpiedThreadCmd = TracingCommand<SpiedThread>;
-
-    using ResumeCmd = TracingCommand<SpiedThread, int>;
-    using HandleSigTrapCmd = TracingCommand<SpiedThread, int>;
 };
 
 

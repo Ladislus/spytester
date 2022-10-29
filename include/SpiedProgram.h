@@ -8,7 +8,6 @@
 
 #include "SpiedThread.h"
 #include "Breakpoint.h"
-#include "TracingCommand.h"
 #include "Tracer.h"
 #include "WrappedFunction.h"
 #include "WatchPoint.h"
@@ -43,15 +42,15 @@ private:
 
     static uint32_t breakPointCounter;
 
-    void(*_onThreadStart)(SpiedThread& spiedThread);
-    void(*_onThreadExit)(SpiedThread& spiedThread);
+    std::function<void(SpiedThread&)> _onThreadStart;
+    std::function<void(SpiedThread&)> _onThreadExit;
     SpiedThread& getSpiedThread(pid_t tid);
 
 public:
     SpiedProgram(std::string &&progName, int argc, char *argv, char *envp);
 
     ~SpiedProgram();
-    void setOnThreadStart(void(*onAddThread)(SpiedThread&) );
+    void setOnThreadStart(std::function<void(SpiedThread &)>&& onThreadStart);
 
     ProgParam* getProgParam();
     const std::string& getProgName();

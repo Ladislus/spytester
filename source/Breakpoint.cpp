@@ -30,7 +30,7 @@ void BreakPoint::set()
             }
         }
         else{
-            _tracer.command(std::make_unique<BreakPointCmd>(*this, &BreakPoint::set));
+            _tracer.command(Tracer::make_unique_cmd([this]{set();}));
         }
     }
 }
@@ -49,7 +49,7 @@ void BreakPoint::unset(SpiedThread& sp)
             }
         }
         else{
-            _tracer.command(std::make_unique<UnsetCmd>(*this, &BreakPoint::unset, sp));
+            _tracer.command(Tracer::make_unique_cmd([this, &sp]{unset(sp);}));
         }
     }
 }
@@ -84,7 +84,9 @@ void BreakPoint::resumeAndSet(SpiedThread &spiedThread)
         }
         else
         {
-            _tracer.command(std::make_unique<ResumeCmd>(*this, &BreakPoint::resumeAndSet, spiedThread));
+            _tracer.command(Tracer::make_unique_cmd( [this, &spiedThread]{
+                resumeAndSet(spiedThread);
+            }));
         }
     }
     else{
@@ -102,7 +104,9 @@ void BreakPoint::resumeAndUnset(SpiedThread &spiedThread) {
         }
         else
         {
-            _tracer.command(std::make_unique<ResumeCmd>(*this, &BreakPoint::resumeAndUnset, spiedThread));
+            _tracer.command(Tracer::make_unique_cmd( [this, &spiedThread]{
+                resumeAndUnset(spiedThread);
+            }));
         }
     }
     else{

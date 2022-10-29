@@ -9,29 +9,9 @@
 #include <string>
 #include <vector>
 #include <queue>
-#include "TracingCommand.h"
 #include "Tracer.h"
 
 class BreakPoint {
-    const static uint8_t INT3 = 0xCC;
-
-    const std::string _name;
-    uint64_t * const _addr;
-    uint64_t _backup;
-    bool _isSet;
-    Tracer& _tracer;
-
-    void prepareToResume(SpiedThread& spiedThread);
-
-    // callback function
-    std::function<void (BreakPoint&, SpiedThread&)> _onHit;
-
-    // default callback function
-    static void defaultOnHit(BreakPoint& breakPoint, SpiedThread& spiedThread);
-    using BreakPointCmd = TracingCommand<BreakPoint>;
-
-    using UnsetCmd = TracingCommand<BreakPoint, SpiedThread&>;
-    using ResumeCmd = TracingCommand<BreakPoint, SpiedThread&>;
 public:
     BreakPoint(Tracer& tracer, const std::string&& name, void* addr);
 
@@ -47,6 +27,25 @@ public:
 
     void resumeAndUnset(SpiedThread &spiedThread);
     void resumeAndSet(SpiedThread &spiedThread);
+
+private:
+    const static uint8_t INT3 = 0xCC;
+
+    const std::string _name;
+    uint64_t * const _addr;
+    uint64_t _backup;
+    bool _isSet;
+    Tracer& _tracer;
+
+    void prepareToResume(SpiedThread& spiedThread);
+
+    // callback function
+    std::function<void (BreakPoint&, SpiedThread&)> _onHit;
+
+    // default callback function
+    static void defaultOnHit(BreakPoint& breakPoint, SpiedThread& spiedThread);
+
+
 };
 
 

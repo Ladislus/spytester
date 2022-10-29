@@ -145,7 +145,7 @@ SpiedThread &SpiedProgram::getSpiedThread(pid_t tid) {
     return *spiedThread;
 }
 
-void SpiedProgram::setOnThreadStart(void(*onThreadStart)(SpiedThread &)) {
+void SpiedProgram::setOnThreadStart(std::function<void(SpiedThread &)>&& onThreadStart) {
     _onThreadStart = onThreadStart;
 }
 

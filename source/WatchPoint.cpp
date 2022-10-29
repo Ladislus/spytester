@@ -55,7 +55,9 @@ void WatchPoint::set(void *addr, WatchPoint::E_Trigger trigger, E_Size size) {
         _isSet = true;
     }
     else {
-        _tracer.command(std::make_unique<WatchPointSetCmd>(*this, &WatchPoint::set, addr, trigger, size));
+        _tracer.command(Tracer::make_unique_cmd([this, addr, trigger, size]{
+            set(addr, trigger, size);
+        }));
     }
 }
 
@@ -82,12 +84,12 @@ void WatchPoint::unset() {
             _isSet = false;
         }
         else{
-            _tracer.command(std::make_unique<WatchPointUnsetCmd>(*this, &WatchPoint::unset));
+            _tracer.command(Tracer::make_unique_cmd([this]{unset();}));
         }
     }
 }
 
-void WatchPoint::setOnHit(void (*onHit)(WatchPoint &, SpiedThread &)) {
+void WatchPoint::setOnHit(std::function<void(WatchPoint &, SpiedThread &)>&& onHit) {
     _onHit = onHit;
 }
 

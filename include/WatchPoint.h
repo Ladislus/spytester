@@ -5,8 +5,8 @@
 #ifndef SPYTESTER_WATCHPOINT_H
 #define SPYTESTER_WATCHPOINT_H
 
-#include "TracingCommand.h"
 #include <cstdint>
+#include <functional>
 
 class SpiedThread;
 class Tracer;
@@ -38,19 +38,17 @@ public:
     void set(void *addr, WatchPoint::E_Trigger trigger, E_Size size);
     void unset();
 
-    void setOnHit(void (*onHit)(WatchPoint&, SpiedThread&));
+    void setOnHit(std::function<void(WatchPoint &, SpiedThread &)>&& onHit);
     void hit();
 
 private:
-    using WatchPointSetCmd = TracingCommand<WatchPoint, void*, E_Trigger, E_Size>;
-    using WatchPointUnsetCmd = TracingCommand<WatchPoint>;
     Tracer& _tracer;
     SpiedThread& _spiedThread;
     bool _isSet;
     const uint32_t _idx;
     void* _addr;
 
-    void (*_onHit)(WatchPoint&, SpiedThread&);
+    std::function<void(WatchPoint &, SpiedThread &)> _onHit;
 
 
 };

@@ -64,7 +64,7 @@ void SpiedThread::resume(int signum) {
         }
         else
         {
-            _tracer.command(std::make_unique<ResumeCmd>(*this, &SpiedThread::resume, signum));
+            _tracer.command(Tracer::make_unique_cmd([this, signum]{resume(signum);}));
         }
     }
     else
@@ -94,7 +94,7 @@ void SpiedThread::singleStep() {
         }
         else
         {
-            _tracer.command(std::make_unique<SpiedThreadCmd>(*this, &SpiedThread::singleStep));
+            _tracer.command(Tracer::make_unique_cmd([this]{singleStep();}));
         }
     }
 
@@ -111,8 +111,7 @@ void SpiedThread::stop() {
         else
         {
             std::unique_lock lk(_stateMutex);
-
-            _tracer.command(std::make_unique<SpiedThreadCmd>(*this, &SpiedThread::stop));
+            _tracer.command(Tracer::make_unique_cmd([this]{stop();}));
 
             // Wait for the spied thread to be actually stopped
             _stateCV.wait(lk, [this]{ return _state == STOPPED;} );
@@ -132,7 +131,7 @@ void SpiedThread::terminate() {
         } else {
             std::unique_lock lk(_stateMutex);
 
-            _tracer.command(std::make_unique<SpiedThreadCmd>(*this, &SpiedThread::terminate));
+            _tracer.command(Tracer::make_unique_cmd([this]{terminate();}));
 
             // Wait for the spied thread to be actually terminated
             _stateCV.wait(lk, [this]{ return _state == TERMINATED;} );
@@ -211,7 +210,7 @@ void SpiedThread::handleSigTrap(int wstatus) {
             resume();
 
         } else {
-            _tracer.command(std::make_unique<HandleSigTrapCmd>(*this, &SpiedThread::handleSigTrap, wstatus));
+            _tracer.command(Tracer::make_unique_cmd([this, wstatus]{ handleSigTrap(wstatus);}));
         }
     }
     else
@@ -293,7 +292,7 @@ void SpiedThread::backtrace() {
     }
     else
     {
-        _tracer.command(std::make_unique<SpiedThreadCmd>(*this, &SpiedThread::backtrace));
+        _tracer.command(Tracer::make_unique_cmd([this]{backtrace();}));
     }
 }
 
@@ -308,7 +307,7 @@ void SpiedThread::detach() {
             std::cout << __FUNCTION__ <<" : thread "<< _tid << " detached" << std::endl;
         }
     }else{
-        _tracer.command(std::make_unique<SpiedThreadCmd>(*this, &SpiedThread::detach));
+        _tracer.command(Tracer::make_unique_cmd([this]{detach();}));
     }
 }
 

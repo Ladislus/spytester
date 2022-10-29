@@ -6,12 +6,14 @@
 #include <map>
 #include <mutex>
 #include <memory>
+#include <iostream>
+#include <functional>
+#include <queue>
 
 #include <semaphore.h>
 #include <pthread.h>
 
 #include "SpiedThread.h"
-#include "TracingCommand.h"
 
 class SpiedProgram;
 
@@ -20,6 +22,22 @@ extern "C" {
 };
 
 class Tracer {
+public :
+
+    using unique_cmd = std::unique_ptr<std::function<void()>>;
+    static constexpr auto make_unique_cmd
+        = std::make_unique<std::function<void()>, std::function<void()>>;
+
+    explicit Tracer(SpiedProgram& spiedProgram);
+    ~Tracer();
+
+    void start();
+    void command(unique_cmd cmd);
+
+    pid_t getTraceePid() const;
+    bool isTracerThread() const;
+
+private:
     typedef enum {
         NOT_STARTED,
         STARTING,
@@ -34,11 +52,13 @@ class Tracer {
     static void * eventHandler(void* tracer);
 
     SpiedProgram& _spiedProgram;
+
     pid_t _tracerTid;
     pid_t _starterTid;
     pid_t _traceeTid;
 
     pthread_attr_t _attr;
+
     pthread_t _evtHandler;
     pthread_t _cmdHandler;
     pthread_t _starter;
@@ -49,26 +69,13 @@ class Tracer {
 
     sem_t _cmdsSem;
     std::mutex _cmdsMutex;
-    std::queue<std::unique_ptr<Command>> _commands;
+
+    std::queue<std::unique_ptr<std::function<void()>>> _commands;
 
     void setState(E_State state);
-
     void initTracer();
     void handleCommand();
     void handleEvent();
-
-public :
-    explicit Tracer(SpiedProgram& spiedProgram);
-
-    ~Tracer();
-
-    void start();
-
-    void command(std::unique_ptr<Command> cmd);
-
-    pid_t getTraceePid() const;
-
-    bool isTracerThread() const;
 };
 
 

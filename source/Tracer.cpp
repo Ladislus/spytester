@@ -145,11 +145,11 @@ void Tracer::handleCommand() {
         //Get next command to execute
         _cmdsMutex.lock();
         if(!_commands.empty()) {
-            auto cmd = std::move(_commands.front());
+            auto command = std::move(_commands.front());
             _commands.pop();
             _cmdsMutex.unlock();
 
-            cmd->execute();
+            (*command)();
         }
         else{
             _cmdsMutex.unlock();
@@ -218,7 +218,7 @@ void Tracer::start() {
     }
 }
 
-void Tracer::command(std::unique_ptr<Command> cmd) {
+void Tracer::command(unique_cmd cmd) {
     if(cmd != nullptr)
     {
         _cmdsMutex.lock();
