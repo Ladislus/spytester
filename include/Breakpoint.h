@@ -19,17 +19,19 @@ public:
 
     void* getAddr() const;
 
-    void set();
-    void unset(SpiedThread& sp);
+    bool set();
+    bool unset();
 
     void setOnHitCallback(std::function<void (BreakPoint&, SpiedThread&)>&& callback);
     void hit(SpiedThread& spiedThread);
 
-    void resumeAndUnset(SpiedThread &spiedThread);
-    void resumeAndSet(SpiedThread &spiedThread);
+    bool resumeAndUnset(SpiedThread &spiedThread);
+    bool resumeAndSet(SpiedThread &spiedThread);
 
 private:
     const static uint8_t INT3 = 0xCC;
+
+    std::recursive_mutex _breakPointMutex;
 
     const std::string _name;
     uint64_t * const _addr;
@@ -37,7 +39,7 @@ private:
     bool _isSet;
     Tracer& _tracer;
 
-    void prepareToResume(SpiedThread& spiedThread);
+    bool prepareToResume(SpiedThread& spiedThread);
 
     // callback function
     std::function<void (BreakPoint&, SpiedThread&)> _onHit;

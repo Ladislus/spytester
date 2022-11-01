@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <mutex>
 
 class SpiedThread;
 class Tracer;
@@ -35,8 +36,8 @@ public:
     void* getAddr();
     bool isSet() const;
 
-    void set(void *addr, WatchPoint::E_Trigger trigger, E_Size size);
-    void unset();
+    bool set(void *addr, WatchPoint::E_Trigger trigger, E_Size size);
+    bool unset();
 
     void setOnHit(std::function<void(WatchPoint &, SpiedThread &)>&& onHit);
     void hit();

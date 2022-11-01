@@ -21,6 +21,12 @@ extern "C" {
     extern void _asm_starter(void*, uint64_t, char*, char*);
 };
 
+typedef enum {
+    UNDEFINED,
+    SUCCESS,
+    FAILURE
+} E_CmdRes;
+
 class Tracer {
 public :
 
@@ -32,7 +38,7 @@ public :
     ~Tracer();
 
     void start();
-    void command(unique_cmd cmd);
+    bool command(std::function<bool()> &&cmd, bool sync = true);
 
     pid_t getTraceePid() const;
     bool isTracerThread() const;
@@ -70,7 +76,7 @@ private:
     sem_t _cmdsSem;
     std::mutex _cmdsMutex;
 
-    std::queue<std::unique_ptr<std::function<void()>>> _commands;
+    std::queue<std::function<bool()>> _commands;
 
     void setState(E_State state);
     void initTracer();

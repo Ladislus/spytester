@@ -14,108 +14,81 @@ void *BreakPoint::getAddr() const{
     return _addr;
 }
 
-void BreakPoint::set()
-{
-    if(!_isSet)
-    {
-        if(_tracer.isTracerThread()) {
+bool BreakPoint::set(){
+    return _tracer.command([this] {
+        if (!_isSet) {
             _backup = *_addr;
             uint64_t newWord = (_backup & (~0xFF)) | INT3;
 
             if (ptrace(PTRACE_POKEDATA, _tracer.getTraceePid(), _addr, newWord) == -1) {
-                std::cerr << __FUNCTION__ << " : PTRACE_POKEDATA failed : " << strerror(errno) << std::endl;
+                std::cerr << "BreakPoint::set : PTRACE_POKEDATA failed : " << strerror(errno) << std::endl;
             } else {
-                std::cout << __FUNCTION__ << " : breakpoint (" << _name << ") set" << std::endl;
+                std::cout << "BreakPoint::set : breakpoint (" << _name << ") set" << std::endl;
                 _isSet = true;
             }
         }
-        else{
-            _tracer.command(Tracer::make_unique_cmd([this]{set();}));
-        }
-    }
+        return _isSet;
+    });
 }
 
 
-void BreakPoint::unset(SpiedThread& sp)
-{
-    if(_isSet)
-    {
-        if(_tracer.isTracerThread()) {
-            if (ptrace(PTRACE_POKEDATA, sp.getTid(), _addr, _backup) == -1) {
-                std::cerr << __FUNCTION__ << " : PTRACE_POKEDATA failed : " << strerror(errno) << std::endl;
+bool BreakPoint::unset(){
+    return _tracer.command([this] {
+        if (_isSet) {
+            if (ptrace(PTRACE_POKEDATA, _tracer.getTraceePid(), _addr, _backup) == -1) {
+                std::cerr << "BreakPoint::unset : PTRACE_POKEDATA failed : " << strerror(errno) << std::endl;
             } else {
-                std::cout << __FUNCTION__ << " : breakpoint (" << _name << ") unset" << std::endl;
+                std::cout << "BreakPoint::unset : breakpoint (" << _name << ") unset" << std::endl;
                 _isSet = false;
             }
         }
-        else{
-            _tracer.command(Tracer::make_unique_cmd([this, &sp]{unset(sp);}));
-        }
-    }
+        return !_isSet;
+    });
 }
 
 
-void BreakPoint::prepareToResume(SpiedThread& spiedThread)
-{
+bool BreakPoint::prepareToResume(SpiedThread& spiedThread){
     struct user_regs_struct regs;
+    bool res = true;
+
     if (ptrace(PTRACE_GETREGS, spiedThread.getTid(), NULL, &regs) == -1) {
         std::cerr << __FUNCTION__ << ": PTRACE_GETREGS failed for thread "
                   << spiedThread.getTid() << std::endl;
-        return;
+        res = false;
     }
     regs.rip--;
     if (ptrace(PTRACE_SETREGS, spiedThread.getTid(), NULL, &regs) == -1) {
         std::cerr << __FUNCTION__ << ": PTRACE_SETREGS failed for thread "
                   << spiedThread.getTid() << std::endl;
-        return;
+        res = false;
     }
+
+    return res;
 }
 
-void BreakPoint::resumeAndSet(SpiedThread &spiedThread)
+bool BreakPoint::resumeAndSet(SpiedThread &spiedThread)
 {
-    if(spiedThread.getState() == SpiedThread::STOPPED){
-        if(_tracer.isTracerThread())
-        {
-            prepareToResume(spiedThread);
-            unset(spiedThread);
-            spiedThread.singleStep();
-            set();
-            spiedThread.resume();
-        }
-        else
-        {
-            _tracer.command(Tracer::make_unique_cmd( [this, &spiedThread]{
-                resumeAndSet(spiedThread);
-            }));
-        }
-    }
-    else{
-        std::cerr << __FUNCTION__ << " : expect stopped thread" <<std::endl;
-    }
+    return _tracer.command([this, &spiedThread] {
+        return prepareToResume(spiedThread)
+               && unset()
+               && spiedThread.singleStep()
+               && set()
+               && spiedThread.resume();
+    });
 }
 
-
-void BreakPoint::resumeAndUnset(SpiedThread &spiedThread) {
-    if(spiedThread.getState() == SpiedThread::STOPPED){
-        if(_tracer.isTracerThread()) {
-            prepareToResume(spiedThread);
-            unset(spiedThread);
-            spiedThread.resume();
-        }
-        else
-        {
-            _tracer.command(Tracer::make_unique_cmd( [this, &spiedThread]{
-                resumeAndUnset(spiedThread);
-            }));
-        }
-    }
-    else{
-        std::cerr << __FUNCTION__ << " : expect stopped thread" <<std::endl;
-    }
+bool BreakPoint::resumeAndUnset(SpiedThread &spiedThread) {
+    return _tracer.command([this, &spiedThread] {
+        return prepareToResume(spiedThread)
+               && unset()
+               && spiedThread.resume();
+    });
 }
 
 void BreakPoint::setOnHitCallback(std::function<void (BreakPoint&, SpiedThread&)>&& callback) {
+    _breakPointMutex.lock();
     _onHit = callback;
+    _breakPointMutex.unlock();
 }
 
 void BreakPoint::defaultOnHit(BreakPoint& breakPoint, SpiedThread& spiedThread) {

@@ -3,7 +3,6 @@
 #include <cstring>
 #include <wait.h>
 #include <unistd.h>
-#include <sys/mman.h>
 #include "../include/Tracer.h"
 #include "../include/SpiedProgram.h"
 
@@ -137,24 +136,27 @@ void Tracer::handleCommand() {
     std::cout << __FUNCTION__ << " : start handling commands!" << std::endl;
     setState(STARTING);
 
-    while(_state != STOPPING)
+    while(sem_wait(&_cmdsSem) == 0)
     {
-        if(sem_wait(&_cmdsSem) != 0)
-            break;
-
         //Get next command to execute
         _cmdsMutex.lock();
-        if(!_commands.empty()) {
-            auto command = std::move(_commands.front());
-            _commands.pop();
+        while(!_commands.empty()) {
+            auto& command = _commands.front();
             _cmdsMutex.unlock();
 
-            (*command)();
+            command();
+
+            _cmdsMutex.lock();
+            _commands.pop();
         }
-        else{
+        if(_state == STOPPING){
+            // At this point we know the queue is empty, so we can stop handling command
             _cmdsMutex.unlock();
+            break;
         }
+        _cmdsMutex.unlock();
     }
+
     std::cout << __FUNCTION__ << " : stop handling commands!" << std::endl;
     setState(STOPPED);
 }
@@ -173,29 +175,26 @@ void Tracer::handleEvent() {
         SpiedThread &thread = _spiedProgram.getSpiedThread(tid);
 
         if (WIFSTOPPED(wstatus)) {
-            thread.setState(SpiedThread::STOPPED);
-
             int signum = WSTOPSIG(wstatus);
+            thread.setState(SpiedThread::STOPPED, signum);
+
             std::cout << __FUNCTION__ << " : thread " << tid << " stopped : SIG = " << signum << std::endl;
             switch (signum) {
                 case SIGTRAP:
                     thread.handleSigTrap(wstatus);
                     break;
-                case SIGSTOP:
-                    break;
                 default:
-                    thread.resume(signum);
                     break;
             }
         } else if (WIFCONTINUED(wstatus)) {
             thread.setState(SpiedThread::RUNNING);
             std::cout << __FUNCTION__ << " : thread " << tid << " resumed!" << std::endl;
         } else if (WIFEXITED(wstatus)) {
-            thread.setState(SpiedThread::TERMINATED);
+            thread.setState(SpiedThread::TERMINATED, WEXITSTATUS(wstatus));
             std::cout << __FUNCTION__ << " : thread " << tid << " exits with code " << WEXITSTATUS(wstatus)
                       << std::endl;
         } else if (WIFSIGNALED(wstatus)) {
-            thread.setState(SpiedThread::TERMINATED);
+            thread.setState(SpiedThread::TERMINATED, WTERMSIG(wstatus));
             std::cout << __FUNCTION__ << " : thread " << tid << " exits with signal " << WTERMSIG(wstatus)
                       << std::endl;
         }
@@ -218,18 +217,54 @@ void Tracer::start() {
     }
 }
 
-void Tracer::command(unique_cmd cmd) {
-    if(cmd != nullptr)
-    {
+bool Tracer::command(std::function<bool()> &&cmd, bool sync) {
+    bool res = false;
+
+    if(gettid() == _tracerTid) {
+        res = cmd();
+    } else if(sync) {
+        std::condition_variable cmdResCV;
+        std::mutex cmdResMutex;
+
+        std::unique_lock lk(cmdResMutex);
+        bool cmdExecuted = false;
+
         _cmdsMutex.lock();
-        _commands.push(std::move(cmd));
+
+        if(_state != TRACING && _state != STARTING){
+            _cmdsMutex.unlock();
+            return false;
+        }
+
+        _commands.emplace([&cmdResMutex, &cmdResCV, &cmd, &res, &cmdExecuted]() {
+            cmdResMutex.lock();
+
+            res = cmd();
+            cmdExecuted = true;
+
+            cmdResMutex.unlock();
+            cmdResCV.notify_all();
+
+            return res;
+        });
         _cmdsMutex.unlock();
         sem_post(&_cmdsSem);
+
+        cmdResCV.wait(lk, [&cmdExecuted] { return cmdExecuted; });
+    } else {
+        _cmdsMutex.lock();
+        _commands.emplace(std::move(cmd));
+        _cmdsMutex.unlock();
+        sem_post(&_cmdsSem);
+
+        res = true;
     }
+
+    return res;
 }
 
 pid_t Tracer::getTraceePid() const {
-    return _traceeTid;
+    return _starterTid;
 }
 
 bool Tracer::isTracerThread() const {

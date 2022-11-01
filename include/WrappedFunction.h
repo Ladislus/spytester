@@ -23,8 +23,8 @@ public:
     WrappedFunction(Tracer& tracer, std::string& binName, TRET (*function)(TARGS ...));
     ~WrappedFunction();
 
-    void set(TRET (*wrapper)(TARGS ...));
-    void reset();
+    bool set(TRET (*wrapper)(TARGS ...));
+    bool reset();
     using FctType = TRET(*)(TARGS ...);
 
 private:
@@ -36,24 +36,25 @@ private:
 };
 
 template<typename TRET, typename... TARGS>
-void WrappedFunction<TRET, TARGS...>::set(TRET (*wrapper)(TARGS...)) {
-    if(_wrapper != wrapper) {
-        if (_tracer.isTracerThread()) {
-            if (ptrace(PTRACE_POKEDATA, _tracer.getTraceePid(), _gotAddr, wrapper) == -1) {
-                std::cout << __FUNCTION__ << " : PTRACE_POKEDATA failed : " << strerror(errno) << std::endl;
-            } else {
-                _wrapper = wrapper;
-            }
+bool WrappedFunction<TRET, TARGS...>::set(TRET (*wrapper)(TARGS...)) {
+    return _tracer.command([this, wrapper] {
+        bool res;
+
+        if (ptrace(PTRACE_POKEDATA, _tracer.getTraceePid(), _gotAddr, wrapper) == -1) {
+            std::cout << "WrappedFunction::set : PTRACE_POKEDATA failed : " << strerror(errno) << std::endl;
+            res = false;
+        } else {
+            _wrapper = wrapper;
+            res = true;
         }
-        else {
-            _tracer.command(Tracer::make_unique_cmd([this, wrapper]{set(wrapper);}));
-        }
-    }
+
+        return res;
+    });
 }
 
 template<typename TRET, typename... TARGS>
-void WrappedFunction<TRET, TARGS...>::reset() {
-    set(_function);
+bool WrappedFunction<TRET, TARGS...>::reset() {
+    return set(_function);
 }
 
 template<typename TRET, typename... TARGS>

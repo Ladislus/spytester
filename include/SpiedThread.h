@@ -26,28 +26,34 @@ public:
 
     pid_t getTid() const;
 
-    E_State getState();
-    void setState(E_State state);
+    void setState(E_State state, int code = 0);
 
-    void handleSigTrap(int wstatus);
+    bool handleSigTrap(int wstatus);
     void handleSigStop();
 
-    void resume(int signum = 0);
-    void singleStep();
-    void stop();
-    void terminate();
+    bool resume(int signum = 0);
+    bool singleStep();
+    bool stop();
+    bool terminate();
 
-    void backtrace();
-    void detach();
+    bool backtrace();
+    bool detach();
 
     WatchPoint* createWatchPoint();
     void deleteWatchPoint(WatchPoint* watchPoint);
 
 private:
     const pid_t _tid;
+
+    std::mutex _cmdResMutex;
+    std::condition_variable _cmdResCV;
+
     std::mutex _stateMutex;
+    std::unique_lock<std::mutex> _stateLock;
     std::condition_variable _stateCV;
+
     E_State _state;
+    int _code;
 
     bool _isSigTrapExpected;
 

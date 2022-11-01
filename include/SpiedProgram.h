@@ -59,7 +59,7 @@ public:
     BreakPoint* getBreakPointAt(void* addr);
     BreakPoint* createBreakPoint(std::string&& symbName);
     BreakPoint* createBreakPoint(void* addr,
-                                 std::string&& name = "BreakPoint" + std::to_string(breakPointCounter));
+                                 std::string&& name = "BreakPoint" + std::to_string(breakPointCounter++));
 
     template<typename TRET, typename ... ARGS>
     WrappedFunction<TRET, ARGS ...>* createWrappedFunction(std::string&& binName, TRET (*function)(ARGS ...));
