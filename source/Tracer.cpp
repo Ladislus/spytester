@@ -11,8 +11,8 @@
 
 #define gettid() syscall(SYS_gettid)
 
-Tracer::Tracer(SpiedProgram &spiedProgram)
-        : _spiedProgram(spiedProgram), _state(NOT_STARTED)
+Tracer::Tracer(SpiedProgram &spiedProgram, bool shareVM)
+: _spiedProgram(spiedProgram), _state(NOT_STARTED), _shareVM(shareVM)
 {
     if(sem_init(&_cmdsSem, 0, 0) == -1){
         std::cerr << __FUNCTION__ << " : semaphore initialization failed : " << strerror(errno) << std::endl;
@@ -51,8 +51,9 @@ void Tracer::initTracer() {
     _tracerTid = gettid();
 
     // Create spied program process
-    _starterTid = clone(preStarter, _spiedProgram.getStackTop(),
-                        CLONE_FS | CLONE_VM | CLONE_FILES | SIGCHLD, this);
+    int cloneFlags = CLONE_FS | CLONE_FILES | SIGCHLD | (_shareVM ? CLONE_VM : 0);
+    _starterTid = clone(preStarter, _spiedProgram.getStackTop(), cloneFlags, this);
+
     if(_starterTid == -1){
         std::cerr << __FUNCTION__ <<" : clone failed : "<< strerror(errno) <<std::endl;
         return;
@@ -64,7 +65,7 @@ void Tracer::initTracer() {
         std::cerr << "waitpid failed : " << strerror(errno) << std::endl;
     }
     if (WIFSTOPPED(wstatus)){
-        if(ptrace(PTRACE_SETOPTIONS, _starterTid, nullptr, PTRACE_O_TRACECLONE) == -1){
+        if(ptrace(PTRACE_SETOPTIONS, _starterTid, nullptr, PTRACE_O_TRACECLONE | PTRACE_O_TRACEFORK) == -1){
             std::cerr << __FUNCTION__ <<" : PTRACE_O_TRACECLONE failed : "<< strerror(errno) <<std::endl;
         }
         if(ptrace(PTRACE_CONT, _starterTid, nullptr, nullptr) == -1){
@@ -74,10 +75,7 @@ void Tracer::initTracer() {
 
     // Wait for pre starter to create starter thread
     if(waitpid(_starterTid, &wstatus, 0) == -1){
-        std::cerr << __FUNCTION__ << " : waitpid failed : " << strerror(errno) << std::endl;
-    }
-    if (WIFEXITED(wstatus)){
-        std::cerr << __FUNCTION__ << " : pre starter has exited" << std::endl;
+        std::cerr << __FUNCTION__ << " : waitpid failed (create starter): " << strerror(errno) << std::endl;
     }
 
     _traceeTid = wait(&wstatus);
@@ -106,9 +104,7 @@ int Tracer::preStarter(void * tracer) {
         std::cerr<<__FUNCTION__<<" : ptrace failed : " << strerror(errno) << std::endl;
         std::exit(1);
     }
-
     pthread_create(&(t->_starter), &(t->_attr), starter, t->_spiedProgram.getProgParam());
-
     return 0;
 }
 

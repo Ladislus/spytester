@@ -21,7 +21,7 @@ void defaultOnRemoveThread(SpiedThread& spiedThread)
     std::cout << "Thread "<< spiedThread.getTid() <<" deleted" <<std::endl;
 }
 
-SpiedProgram::SpiedProgram(std::string&& progName, int argc, char* argv, char* envp)
+SpiedProgram::SpiedProgram(std::string &&progName, int argc, char *argv, char *envp, bool shareVM)
 : _progName(progName), _onThreadStart(defaultOnAddThread), _onThreadExit(defaultOnRemoveThread) {
 
     _progParam.argc = (uint64_t) argc;
@@ -49,7 +49,7 @@ SpiedProgram::SpiedProgram(std::string&& progName, int argc, char* argv, char* e
         throw std::invalid_argument("Cannot allocate stack");
     }
 
-    _tracer = new Tracer(*this);
+    _tracer = new Tracer(*this, shareVM);
 }
 
 SpiedProgram::~SpiedProgram(){

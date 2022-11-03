@@ -10,7 +10,9 @@ int main(int argc, char* argv[], char* envp[])
     }
 
     try{
-        SpiedProgram sp(argv[1], argc-1, argv[1], envp[0]);
+        std::cerr << "INIT" << std::endl;
+
+        SpiedProgram sp(argv[1], argc - 1, argv[1], envp[0], false);
 
         sp.setOnThreadStart([](SpiedThread& sp){
             sp.resume();

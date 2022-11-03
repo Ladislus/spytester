@@ -18,7 +18,7 @@ int main(int argc, char* argv[], char* envp[])
     }
 
     try{
-        SpiedProgram prog(argv[1], argc-1, argv[1], envp[0]);
+        SpiedProgram prog(argv[1], argc - 1, argv[1], envp[0], false);
 
         prog.setOnThreadStart([](SpiedThread& sp) {
             lastCreatedThread = &sp;

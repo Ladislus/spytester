@@ -65,15 +65,17 @@ bool SpiedThread::singleStep() {
         bool success = true;
         std::unique_lock stateLk(_stateMutex);
 
+        _isSigTrapExpected = true;
         if (ptrace(PTRACE_SINGLESTEP, _tid, nullptr, nullptr) == -1) {
             success = false;
+            _isSigTrapExpected = false;
             std::cerr << "SpiedThread::singleStep : PTRACE_SINGLESTEP failed for "
                       << _tid << " : " << strerror(errno) << std::endl;
         } else {
-            _isSigTrapExpected = true; // FIXME le sigTrap pourrait être arriver avant
             _state = RUNNING;
             if (!_stateCV.wait_for(stateLk, STATE_TIMEOUT, [this] { return _state == STOPPED; })) {
                 success = false;
+                _isSigTrapExpected = false;
                 std::cerr << "SpiedThread::singleStep timeout for thread " << _tid << std::endl;
             }
         }
@@ -155,8 +157,8 @@ bool SpiedThread::handleSigTrap(int wstatus) {
             }
 
             // Handle breakpoint
-            if (ptrace(PTRACE_GETREGS, _tid, NULL, &regs)) {
-                std::cout << "SpiedThread::handleSigTrap : PTRACE_GETREGS failed : " << strerror(errno) << std::endl;
+            if (ptrace(PTRACE_GETREGS, _tid, NULL, &regs) == -1) {
+                std::cerr << "SpiedThread::handleSigTrap : PTRACE_GETREGS failed : " << strerror(errno) << std::endl;
                 return true;
             }
 

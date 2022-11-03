@@ -21,20 +21,12 @@ extern "C" {
     extern void _asm_starter(void*, uint64_t, char*, char*);
 };
 
-typedef enum {
-    UNDEFINED,
-    SUCCESS,
-    FAILURE
-} E_CmdRes;
-
 class Tracer {
 public :
 
-    using unique_cmd = std::unique_ptr<std::function<void()>>;
-    static constexpr auto make_unique_cmd
-        = std::make_unique<std::function<void()>, std::function<void()>>;
-
-    explicit Tracer(SpiedProgram& spiedProgram);
+    Tracer(SpiedProgram &spiedProgram, bool shareVM);
+    Tracer(const Tracer&) = delete;
+    Tracer(Tracer&&) = delete;
     ~Tracer();
 
     void start();
@@ -58,6 +50,7 @@ private:
     static void * eventHandler(void* tracer);
 
     SpiedProgram& _spiedProgram;
+    bool _shareVM;
 
     pid_t _tracerTid;
     pid_t _starterTid;

@@ -20,7 +20,7 @@ public:
     } E_State;
 
     SpiedThread(SpiedProgram& spiedProgram, Tracer& tracer, pid_t tid);
-    SpiedThread(SpiedThread&& spiedThread) = default;
+    SpiedThread(SpiedThread&& spiedThread) = delete;
     SpiedThread(const SpiedThread& ) = delete;
     ~SpiedThread();
 
@@ -44,9 +44,6 @@ public:
 
 private:
     const pid_t _tid;
-
-    std::mutex _cmdResMutex;
-    std::condition_variable _cmdResCV;
 
     std::mutex _stateMutex;
     std::unique_lock<std::mutex> _stateLock;
