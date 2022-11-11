@@ -18,7 +18,7 @@ int main(int argc, char* argv[], char* envp[])
     }
 
     try{
-        SpiedProgram prog(argv[1], argc - 1, argv[1], envp[0], false);
+        SpiedProgram prog(argv[1], argc - 1, argv[1], envp[0], true);
 
         prog.setOnThreadStart([](SpiedThread& sp) {
             lastCreatedThread = &sp;
@@ -35,12 +35,13 @@ int main(int argc, char* argv[], char* envp[])
 
         sleep(1);
 
-        auto f = prog.createWrappedFunction("TestProgram", testLibFunction);
-        f->set([](int a){
+        auto f = prog.wrapFunction<testLibFunction>("TestProgram");
+        WrappedFunction<testLibFunction>::setWrapper([](int a){
             std::cout<< "HELLO!" <<std::endl;
             testLibFunction(a);
             return a+2;
         });
+        f->wrapping(true);
 
         prog.resume();
 

@@ -39,6 +39,7 @@ private:
     Tracer* _tracer;
     std::vector<std::unique_ptr<SpiedThread>> _spiedThreads;
     std::vector<std::unique_ptr<BreakPoint>> _breakPoints;
+    std::map<std::pair<void*, void*>, std::unique_ptr<AbstractWrappedFunction>> _wrappedFunctions;
 
     static uint32_t breakPointCounter;
 
@@ -61,8 +62,11 @@ public:
     BreakPoint* createBreakPoint(void* addr,
                                  std::string&& name = "BreakPoint" + std::to_string(breakPointCounter++));
 
-    template<typename TRET, typename ... ARGS>
-    WrappedFunction<TRET, ARGS ...>* createWrappedFunction(std::string&& binName, TRET (*function)(ARGS ...));
+    template<auto faddr>
+    AbstractWrappedFunction* wrapFunction(std::string&& binName);
+
+    template<auto faddr>
+    void unwrapFunction(std::string&& binName);
 
     void start();
     void resume();
@@ -70,10 +74,39 @@ public:
     void terminate();
 };
 
-template<typename TRET, typename... ARGS>
-WrappedFunction<TRET, ARGS...> *SpiedProgram::createWrappedFunction(std::string &&binName, TRET (*function)(ARGS...)) {
-    // #TODO add wrapped function management in SpiedProgram
-    return new WrappedFunction<TRET, ARGS...>(*_tracer, binName, function);
+template<auto faddr>
+AbstractWrappedFunction* SpiedProgram::wrapFunction(std::string &&binName) {
+    void* handle = dlopen(binName.c_str(), RTLD_NOLOAD | RTLD_NOW);
+    AbstractWrappedFunction* wrappedFunction = nullptr;
+
+    if(_handle == nullptr){
+        std::cerr << __FUNCTION__ << " : dlopen failed for " << handle << " : " << dlerror() << std::endl;
+    } else try {
+        _wrappedFunctions.try_emplace(
+                std::make_pair((void*)faddr, handle),
+                std::make_unique<WrappedFunction<faddr>>(*_tracer, handle)
+        );
+        wrappedFunction = _wrappedFunctions[std::make_pair((void*)faddr, handle)].get();
+
+    } catch(const std::invalid_argument& e) {
+        std::cerr << __FUNCTION__ <<" : WrappedFunction construction failed : " << e.what() << std::endl;
+    }
+
+    return wrappedFunction;
+}
+
+template<auto faddr>
+void SpiedProgram::unwrapFunction(std::string &&binName) {
+    void* handle = dlopen(binName.c_str(), RTLD_NOLOAD | RTLD_NOW);
+
+    if(_handle == nullptr){
+        std::cerr << __FUNCTION__ << " : dlopen failed for " << handle << " : " << dlerror() << std::endl;
+    } else {
+        auto it = _wrappedFunctions.find(faddr, handle);
+        if(it != _wrappedFunctions.end()){
+            _wrappedFunctions.erase(it);
+        }
+    }
 }
 
 #endif //SPYTESTER_SPIEDPROGRAM_H
