@@ -12,11 +12,13 @@ int main(int argc, char* argv[], char* envp[])
     try{
         std::cerr << "INIT" << std::endl;
 
-        SpiedProgram sp(argv[1], argc - 1, argv[1], envp[0], false);
+        SpiedProgram sp(argv[1], argc - 1, argv[1], envp[0], true);
 
         sp.setOnThreadStart([](SpiedThread& sp){
             sp.resume();
         });
+
+        sp.relink("libThreadIdLib.so");
 
         BreakPoint* bp1 = sp.createBreakPoint((void*)&main1);
         BreakPoint* bp3 = sp.createBreakPoint((void*)&main3);

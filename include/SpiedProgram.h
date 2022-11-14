@@ -1,7 +1,3 @@
-//
-// Created by baptiste on 10/09/22.
-//
-
 #ifndef SPYTESTER_SPIEDPROGRAM_H
 #define SPYTESTER_SPIEDPROGRAM_H
 
@@ -32,9 +28,9 @@ class SpiedProgram {
 private:
     const std::string _progName;
     void* _handle;
+    Lmid_t _lmid;
     void* _stack;
     ProgParam _progParam{};
-
 
     Tracer* _tracer;
     std::vector<std::unique_ptr<SpiedThread>> _spiedThreads;
@@ -51,6 +47,9 @@ public:
     SpiedProgram(std::string &&progName, int argc, char *argv, char *envp, bool shareVM = true);
 
     ~SpiedProgram();
+
+    bool relink(std::string&& libName);
+
     void setOnThreadStart(std::function<void(SpiedThread &)>&& onThreadStart);
 
     ProgParam* getProgParam();
@@ -76,10 +75,10 @@ public:
 
 template<auto faddr>
 AbstractWrappedFunction* SpiedProgram::wrapFunction(std::string &&binName) {
-    void* handle = dlopen(binName.c_str(), RTLD_NOLOAD | RTLD_NOW);
     AbstractWrappedFunction* wrappedFunction = nullptr;
+    void* handle = dlmopen(_lmid, binName.c_str(), RTLD_NOLOAD | RTLD_NOW);
 
-    if(_handle == nullptr){
+    if(handle == nullptr){
         std::cerr << __FUNCTION__ << " : dlopen failed for " << handle << " : " << dlerror() << std::endl;
     } else try {
         _wrappedFunctions.try_emplace(

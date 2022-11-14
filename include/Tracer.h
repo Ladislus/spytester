@@ -32,7 +32,7 @@ public :
     void start();
     bool command(std::function<bool()> &&cmd, bool sync = true);
 
-    pid_t getTraceePid() const;
+        pid_t getTraceePid() const;
     bool isTracerThread() const;
 
 private:

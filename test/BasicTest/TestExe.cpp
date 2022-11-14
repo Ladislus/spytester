@@ -11,6 +11,7 @@ static SpiedThread* lastCreatedThread;
 
 int main(int argc, char* argv[], char* envp[])
 {
+    std::cout << "testLibFunction = " << (void*)&testLibFunction << std::endl;
     if(argc<2)
     {
         std::cerr << argv[0] <<": expected at least 1 argument (program name)"<< std::endl;
@@ -19,6 +20,9 @@ int main(int argc, char* argv[], char* envp[])
 
     try{
         SpiedProgram prog(argv[1], argc - 1, argv[1], envp[0], true);
+
+        prog.relink("libTestLib.so");
+        std::cout << "testLibFunction = " << (void*)&testLibFunction << std::endl;
 
         prog.setOnThreadStart([](SpiedThread& sp) {
             lastCreatedThread = &sp;

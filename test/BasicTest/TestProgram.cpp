@@ -6,7 +6,7 @@
 
 void TestFunction()
 {
-    std::cout << __FUNCTION__ <<" called!" << std::endl;
+    std::cout << __FUNCTION__ <<" called! and b = "<< b << std::endl;
 }
 
 extern "C"
