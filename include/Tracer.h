@@ -24,7 +24,7 @@ extern "C" {
 class Tracer {
 public :
 
-    Tracer(SpiedProgram &spiedProgram, bool shareVM);
+    Tracer(SpiedProgram &spiedProgram);
     Tracer(const Tracer&) = delete;
     Tracer(Tracer&&) = delete;
     ~Tracer();
@@ -32,7 +32,7 @@ public :
     void start();
     bool command(std::function<bool()> &&cmd, bool sync = true);
 
-        pid_t getTraceePid() const;
+    pid_t getTraceePid() const;
     bool isTracerThread() const;
 
 private:
@@ -50,7 +50,6 @@ private:
     static void * eventHandler(void* tracer);
 
     SpiedProgram& _spiedProgram;
-    bool _shareVM;
 
     pid_t _tracerTid;
     pid_t _starterTid;

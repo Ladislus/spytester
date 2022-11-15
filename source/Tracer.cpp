@@ -11,8 +11,8 @@
 
 #define gettid() syscall(SYS_gettid)
 
-Tracer::Tracer(SpiedProgram &spiedProgram, bool shareVM)
-: _spiedProgram(spiedProgram), _state(NOT_STARTED), _shareVM(shareVM)
+Tracer::Tracer(SpiedProgram &spiedProgram)
+: _spiedProgram(spiedProgram), _state(NOT_STARTED)
 {
     if(sem_init(&_cmdsSem, 0, 0) == -1){
         std::cerr << __FUNCTION__ << " : semaphore initialization failed : " << strerror(errno) << std::endl;
@@ -51,7 +51,7 @@ void Tracer::initTracer() {
     _tracerTid = gettid();
 
     // Create spied program process
-    int cloneFlags = CLONE_FS | CLONE_FILES | SIGCHLD | (_shareVM ? CLONE_VM : 0);
+    int cloneFlags = CLONE_FS | CLONE_FILES | SIGCHLD | CLONE_VM;
     _starterTid = clone(preStarter, _spiedProgram.getStackTop(), cloneFlags, this);
 
     if(_starterTid == -1){

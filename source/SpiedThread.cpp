@@ -11,6 +11,7 @@
 #include <dlfcn.h>
 #include <sys/syscall.h>
 #include <unistd.h>
+#include <sys/procfs.h>
 
 #define tkill(tid, sig) syscall(SYS_tkill, tid, sig)
 #define STATE_TIMEOUT std::chrono::seconds(1)

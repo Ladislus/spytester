@@ -7,7 +7,6 @@
 #include <cstring>
 #include <iostream>
 
-static const std::string entryPointSymb("_start");
 static const size_t stackSize = 1<<23;
 
 uint32_t SpiedProgram::breakPointCounter = 0;
@@ -22,7 +21,7 @@ void defaultOnRemoveThread(SpiedThread& spiedThread)
     std::cout << "Thread "<< spiedThread.getTid() <<" deleted" <<std::endl;
 }
 
-SpiedProgram::SpiedProgram(std::string &&progName, int argc, char *argv, char *envp, bool shareVM)
+SpiedProgram::SpiedProgram(std::string &&progName, int argc, char *argv, char *envp)
 : _progName(progName), _onThreadStart(defaultOnAddThread), _onThreadExit(defaultOnRemoveThread), _lmid(0) {
 
     _progParam.argc = (uint64_t) argc;
@@ -36,16 +35,19 @@ SpiedProgram::SpiedProgram(std::string &&progName, int argc, char *argv, char *e
     }
 
     if (dlinfo(_handle, RTLD_DI_LMID, &_lmid) == -1){
-        std::cerr << __FUNCTION__ << " : dlinfo failed : " << dlerror() << std::endl;
+        std::cerr << __FUNCTION__ << " : dlinfo failed RTLD_DI_LMID : " << dlerror() << std::endl;
         throw std::invalid_argument("Failed to get new link map id");
     }
 
-    _progParam.entryPoint = dlsym(_handle, entryPointSymb.c_str());
-    if (_progParam.entryPoint == nullptr) {
-        std::cerr << __FUNCTION__ << " : dlsym failed for " << entryPointSymb << " : " << dlerror() << std::endl;
-        dlclose(_handle);
-        throw std::invalid_argument("Cannot find entry point");
+    struct link_map* lm;
+    if (dlinfo(_handle, RTLD_DI_LINKMAP, &lm) == -1) {
+        std::cerr << __FUNCTION__ << " : dlinfo failed RTLD_DI_LINKMAP : " << dlerror() << std::endl;
+        throw std::invalid_argument("Failed to get link map ");
     }
+
+    auto elfHdr = (Elf64_Ehdr*)lm->l_addr;
+    Elf64_Addr baseAddr = lm->l_addr;
+    _progParam.entryPoint = (void*)(baseAddr + elfHdr->e_entry);
 
     _stack = mmap(nullptr, stackSize, PROT_READ | PROT_WRITE,
                       MAP_PRIVATE | MAP_ANONYMOUS | MAP_STACK, -1, 0);
@@ -55,7 +57,7 @@ SpiedProgram::SpiedProgram(std::string &&progName, int argc, char *argv, char *e
         throw std::invalid_argument("Cannot allocate stack");
     }
 
-    _tracer = new Tracer(*this, shareVM);
+    _tracer = new Tracer(*this);
 }
 
 SpiedProgram::~SpiedProgram(){

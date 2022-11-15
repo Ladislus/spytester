@@ -19,7 +19,7 @@ int main(int argc, char* argv[], char* envp[])
     }
 
     try{
-        SpiedProgram prog(argv[1], argc - 1, argv[1], envp[0], true);
+        SpiedProgram prog(argv[1], argc - 1, argv[1], envp[0]);
 
         prog.relink("libTestLib.so");
         std::cout << "testLibFunction = " << (void*)&testLibFunction << std::endl;

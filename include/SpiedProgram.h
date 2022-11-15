@@ -44,7 +44,7 @@ private:
     SpiedThread& getSpiedThread(pid_t tid);
 
 public:
-    SpiedProgram(std::string &&progName, int argc, char *argv, char *envp, bool shareVM = true);
+    SpiedProgram(std::string &&progName, int argc, char *argv, char *envp);
 
     ~SpiedProgram();
 
