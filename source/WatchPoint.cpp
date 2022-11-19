@@ -14,71 +14,70 @@ WatchPoint::WatchPoint(Tracer &tracer, SpiedThread& spiedThread, uint32_t idx) :
 _tracer(tracer), _spiedThread(spiedThread), _addr(nullptr), _idx(idx), _isSet(false), _onHit(defaultOnHit)
 {}
 
-WatchPoint::~WatchPoint() {
-    unset();
-}
-
 bool WatchPoint::set(void *addr, WatchPoint::E_Trigger trigger, E_Size size) {
-    return _tracer.command([this, addr, trigger, size] {
-        uint64_t dr7 = ptrace(PTRACE_PEEKUSER, _spiedThread.getTid(), offsetof(struct user, u_debugreg[7]), NULL);
-        if (dr7 == -1) {
-            std::cerr <<"WatchPoint::set : PTRACE_PEEKUSER for dr7 failed : " << strerror(errno);
-            return false;
-        }
 
-        const uint64_t offset = offsetof(struct user, u_debugreg[0]) + _idx * sizeof(user::u_debugreg[0]);
-        if (ptrace(PTRACE_POKEUSER, _spiedThread.getTid(), offset, addr) == -1) {
-            std::cerr <<"WatchPoint::set : PTRACE_POKEUSER for dri failed : " << strerror(errno);
-            return false;
-        }
-        _addr = addr;
+    uint64_t dr7 = _tracer.commandPTrace(true, PTRACE_PEEKUSER, _spiedThread.getTid(), offsetof(struct user, u_debugreg[7]), NULL);
+    if (dr7 == -1) {
+        std::cerr <<"WatchPoint::set : PTRACE_PEEKUSER for dr7 failed : " << strerror(errno);
+        return false;
+    }
 
-        // Reset dr7 bits corresponding to current watchpoint
-        dr7 &= ~((0b11 << (_idx * 2)) | (0b1111 << (_idx * 4 + 16)));
+    const uint64_t offset = offsetof(struct user, u_debugreg[0]) + _idx * sizeof(user::u_debugreg[0]);
+    if (_tracer.commandPTrace(true, PTRACE_POKEUSER, _spiedThread.getTid(), offset, addr) == -1) {
+        std::cerr <<"WatchPoint::set : PTRACE_POKEUSER for dri failed : " << strerror(errno);
+        return false;
+    }
+    _addr = addr;
 
-        // Set dr7 bits corresponding to parameters
-        dr7 |= (0b11 << (_idx * 2));
-        dr7 |= (trigger << (_idx * 4 + 16));
-        dr7 |= (size << (_idx * 4 + 18));
+    // Reset dr7 bits corresponding to current watchpoint
+    dr7 &= ~((0b11 << (_idx * 2)) | (0b1111 << (_idx * 4 + 16)));
 
-        if (ptrace(PTRACE_POKEUSER, _spiedThread.getTid(), offsetof(struct user, u_debugreg[7]), dr7) == -1) {
-            std::cerr << "WatchPoint::set : PTRACE_POKEUSER for dr7 failed : " << strerror(errno);
-            return false;
-        }
+    // Set dr7 bits corresponding to parameters
+    dr7 |= (0b11 << (_idx * 2));
+    dr7 |= (trigger << (_idx * 4 + 16));
+    dr7 |= (size << (_idx * 4 + 18));
 
-        _addr = addr;
-        _isSet = true;
+    if (_tracer.commandPTrace(true, PTRACE_POKEUSER, _spiedThread.getTid(), offsetof(struct user, u_debugreg[7]), dr7) == -1) {
+        std::cerr << "WatchPoint::set : PTRACE_POKEUSER for dr7 failed : " << strerror(errno);
+        return false;
+    }
 
-        return true;
-    });
+    _addr = addr;
+    _isSet = true;
+
+    return true;
 }
 
 bool WatchPoint::unset() {
-    return _tracer.command([this] {
-        uint64_t dr7 = ptrace(PTRACE_PEEKUSER, _spiedThread.getTid(), offsetof(struct user, u_debugreg[7]), NULL);
-        if (dr7 == -1) {
-            std::cerr << "WatchPoint::unset : PTRACE_PEEKUSER for dr7 failed : " << strerror(errno);
-            return false;
-        }
+    uint64_t dr7 = _tracer.commandPTrace(true, PTRACE_PEEKUSER, _spiedThread.getTid(),
+                                         offsetof(struct user, u_debugreg[7]), NULL);
+    if (dr7 == -1) {
+        std::cerr << "WatchPoint::unset : PTRACE_PEEKUSER for dr7 failed : " << strerror(errno);
+        return false;
+    }
 
-        dr7 &= ~(0b11 << (_idx * 2));
+    dr7 &= ~(0b11 << (_idx * 2));
 
-        if (ptrace(PTRACE_POKEUSER, _spiedThread.getTid(), offsetof(struct user, u_debugreg[7]), dr7) == -1) {
-            std::cerr << "WatchPoint::unset : PTRACE_POKEUSER for dr7 failed : " << strerror(errno);
-            return false;
-        }
+    if (_tracer.commandPTrace(true, PTRACE_POKEUSER, _spiedThread.getTid(),
+                              offsetof(struct user, u_debugreg[7]), dr7) == -1)
+    {
+        std::cerr << "WatchPoint::unset : PTRACE_POKEUSER for dr7 failed : " << strerror(errno);
+        return false;
+    }
 
-        _isSet = false;
-        return true;
-    });
+    _isSet = false;
+    return true;
 }
 
 void WatchPoint::setOnHit(std::function<void(WatchPoint &, SpiedThread &)>&& onHit) {
-    // FIXME aucune valeur si un appel asynchrone est en cours sur _onHit
+    std::lock_guard lk(_callbackMutex);
+
     _onHit = onHit;
 }
 
 void WatchPoint::hit() {
+    std::lock_guard lk(_callbackMutex);
+
     _onHit(*this, _spiedThread);
 }
 

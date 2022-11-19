@@ -5,6 +5,7 @@
 #include <csignal>
 #include <mutex>
 #include <condition_variable>
+#include <sys/user.h>
 #include "WatchPoint.h"
 
 class Tracer;
@@ -31,6 +32,10 @@ public:
     bool handleSigTrap(int wstatus);
     void handleSigStop();
 
+    uint64_t getRip();
+    uint64_t getRbp();
+    void setRip(uint64_t rip);
+
     bool resume(int signum = 0);
     bool singleStep();
     bool stop();
@@ -43,18 +48,24 @@ public:
     void deleteWatchPoint(WatchPoint* watchPoint);
 
 private:
+    void setRegisters();
+    void getRegisters();
+
     const pid_t _tid;
 
-    std::mutex _stateMutex;
-    std::unique_lock<std::mutex> _stateLock;
-    std::condition_variable _stateCV;
+    struct user_regs_struct _regs;
+    bool _isRegsDirty;
+    bool _isRegsModified;
+
+    std::recursive_mutex _stateMutex;
+    std::condition_variable_any _stateCV;
 
     E_State _state;
     int _code;
 
     bool _isSigTrapExpected;
 
-    std::vector<std::pair<WatchPoint, bool>> _watchPoints;
+    std::vector<std::pair<std::unique_ptr<WatchPoint>, bool>> _watchPoints;
     Tracer& _tracer;
 
     SpiedProgram& _spiedProgram;

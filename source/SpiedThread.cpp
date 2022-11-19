@@ -9,19 +9,17 @@
 #include <cstring>
 #include <sys/user.h>
 #include <dlfcn.h>
-#include <sys/syscall.h>
-#include <unistd.h>
-#include <sys/procfs.h>
 
-#define tkill(tid, sig) syscall(SYS_tkill, tid, sig)
-#define STATE_TIMEOUT std::chrono::seconds(1)
+#define STATE_TIMEOUT std::chrono::seconds(5)
 
 SpiedThread::SpiedThread(SpiedProgram& spiedProgram, Tracer& tracer, pid_t tid) : _tracer(tracer), _tid(tid),
-_state(STOPPED), _isSigTrapExpected(false), _spiedProgram(spiedProgram), _code(0),
-_stateLock(_stateMutex, std::defer_lock)
+_state(STOPPED), _isSigTrapExpected(false), _spiedProgram(spiedProgram), _code(0), _isRegsDirty(true),
+_regs(), _isRegsModified(false)
 {
     for(uint32_t idx = 0; idx<WatchPoint::maxNb; idx++){
-        _watchPoints.emplace_back(std::make_pair(WatchPoint(_tracer, *this, idx), false));
+        _watchPoints.emplace_back( std::make_pair(
+                        std::make_unique<WatchPoint>(_tracer, *this, idx),
+                        false));
     }
 }
 
@@ -34,186 +32,166 @@ pid_t SpiedThread::getTid() const {
 }
 
 void SpiedThread::setState(E_State state, int code) {
-    std::unique_lock lk(_stateMutex);
+    _stateMutex.lock();
+
+    _isRegsDirty = true;
+
     _code = code;
     _state = state;
-    lk.unlock();
+
+    _stateMutex.unlock();
 
     _stateCV.notify_all();
 }
 
 bool SpiedThread::resume(int signum) {
 
-    return _tracer.command([this, signum] {
-        bool success;
+    bool success;
+    setRegisters();
 
-        if (ptrace(PTRACE_CONT, _tid, nullptr, signum) == -1) {
-            success = false;
-            std::cerr << "SpiedThread::resume : PTRACE_CONT failed for " << _tid << " : " << strerror(errno)
-                      << std::endl;
-        } else {
-            success = true;
-            setState(RUNNING, 0);
-            std::cout << "SpiedThread::resume : thread " <<_tid <<" resumed" <<  std::endl;
-        }
+    if (_tracer.commandPTrace(false, PTRACE_CONT, _tid, nullptr, signum) == -1) {
+        success = false;
+        std::cerr << "SpiedThread::resume : PTRACE_CONT failed for " << _tid << " : " << strerror(errno)
+                  << std::endl;
+    } else {
+        success = true;
+        setState(RUNNING, 0);
+        std::cout << "SpiedThread::resume : thread " <<_tid <<" resumed" <<  std::endl;
+    }
 
-        return success;
-    });
+    return success;
 }
 
 bool SpiedThread::singleStep() {
-    return _tracer.command([this] {
-        bool success = true;
-        std::unique_lock stateLk(_stateMutex);
+    std::unique_lock stateLk(_stateMutex);
 
-        _isSigTrapExpected = true;
-        if (ptrace(PTRACE_SINGLESTEP, _tid, nullptr, nullptr) == -1) {
+    bool success = true;
+    setRegisters();
+
+    _isSigTrapExpected = true;
+    if (_tracer.commandPTrace(true, PTRACE_SINGLESTEP, _tid, nullptr, nullptr) == -1) {
+        success = false;
+        _isSigTrapExpected = false;
+        std::cerr << "SpiedThread::singleStep : PTRACE_SINGLESTEP failed for "
+                  << _tid << " : " << strerror(errno) << std::endl;
+    } else {
+        setState(RUNNING);
+        if (!_stateCV.wait_for(stateLk, STATE_TIMEOUT, [this] { return _state == STOPPED; })) {
             success = false;
             _isSigTrapExpected = false;
-            std::cerr << "SpiedThread::singleStep : PTRACE_SINGLESTEP failed for "
-                      << _tid << " : " << strerror(errno) << std::endl;
-        } else {
-            _state = RUNNING;
-            if (!_stateCV.wait_for(stateLk, STATE_TIMEOUT, [this] { return _state == STOPPED; })) {
-                success = false;
-                _isSigTrapExpected = false;
-                std::cerr << "SpiedThread::singleStep timeout for thread " << _tid << std::endl;
-            }
+            std::cerr << "SpiedThread::singleStep timeout for thread " << _tid << std::endl;
         }
+    }
 
-        return success;
-    });
+    return success;
 }
 
 bool SpiedThread::stop() {
-    return _tracer.command([this] {
-        bool success = true;
-        std::unique_lock lk(_stateMutex);
 
-        if(_state != STOPPED) {
-            if (tkill(_tid, SIGSTOP) == -1) {
-                success = false;
-                std::cerr << "SpiedThread::stop : SIGSTOP failed for " << _tid << " : "
-                          << strerror(errno) << std::endl;
-            } else if (!_stateCV.wait_for(lk, STATE_TIMEOUT, [this] { return _state == STOPPED; })) {
-                success = false;
-                std::cerr << "SpiedThread::stop timeout for " << _tid << std::endl;
-            }
+    bool success = true;
+    std::unique_lock lk(_stateMutex);
+
+    if(_state != STOPPED) {
+        _tracer.tkill(_tid, SIGSTOP);
+        if (!_stateCV.wait_for(lk, STATE_TIMEOUT, [this] { return _state == STOPPED; })) {
+            success = false;
+            std::cerr << "SpiedThread::stop timeout for " << _tid << std::endl;
         }
+    }
 
-        return success;
-    });
+    return success;
 }
 
 bool SpiedThread::terminate() {
-    return _tracer.command([this] {
-        std::unique_lock lk(_stateMutex);
-        bool success = true;
+    std::unique_lock lk(_stateMutex);
+    bool success = true;
 
-        if (_state != TERMINATED) {
-            if (_state != STOPPED) {
-                if(tkill(_tid, SIGTERM) == -1) {
-                    std::cerr << "SpiedThread::terminate : SIGTERM failed for "
-                              << _tid << " : " << strerror(errno) << std::endl;
-                    return false;
-                } else if(!_stateCV.wait_for(lk, STATE_TIMEOUT,
-                                             [this] { return _state == STOPPED;})) {
-                    std::cerr << "SpiedThread::terminate STOP timeout for " << _tid << std::endl;
-                    return false;
-                }
-            }
-
-            if(ptrace(PTRACE_CONT, _tid, nullptr ,SIGTERM) == -1) {
-                std::cerr << "SpiedThread::terminate : PTRACE_CONT failed for "
-                          << _tid << " : " << strerror(errno) << std::endl;
-                return false;
-            } else if(!_stateCV.wait_for(lk, STATE_TIMEOUT,
-                                         [this] { return _state == TERMINATED;})) {
-                std::cerr << "SpiedThread::terminate TERMINATE timeout for " << _tid << std::endl;
+    if (_state != TERMINATED) {
+        if (_state != STOPPED) {
+            _tracer.tkill(_tid, SIGTERM);
+            if(!_stateCV.wait_for(lk, STATE_TIMEOUT, [this] { return _state == STOPPED;})) {
+                std::cerr << "SpiedThread::terminate STOP timeout for " << _tid << std::endl;
                 return false;
             }
         }
 
-        return success;
-    });
+        _tracer.commandPTrace(false, PTRACE_CONT, _tid, nullptr ,SIGTERM);
+
+        if(!_stateCV.wait_for(lk, STATE_TIMEOUT, [this] { return _state == TERMINATED;})) {
+            std::cerr << "SpiedThread::terminate TERMINATE timeout for " << _tid << std::endl;
+            return false;
+        }
+    }
+
+    return success;
 }
 
 bool SpiedThread::handleSigTrap(int wstatus) {
-    if(!_isSigTrapExpected) {
-        return _tracer.command([this, wstatus] {
-            struct user_regs_struct regs;
+    uint64_t rip;
 
-
-            // Handle thread creation
-            if ((wstatus >> 16) == PTRACE_EVENT_CLONE) {
-
-                unsigned long newThread;
-                ptrace(PTRACE_GETEVENTMSG, _tid, nullptr, &newThread);
-
-                std::cout << "SpiedThread::handleSigTrap : thread " << _tid << " create new thread "
-                          << newThread << std::endl;
-
-                resume();
-                return true;
-            }
-
-            // Handle breakpoint
-            if (ptrace(PTRACE_GETREGS, _tid, NULL, &regs) == -1) {
-                std::cerr << "SpiedThread::handleSigTrap : PTRACE_GETREGS failed : " << strerror(errno) << std::endl;
-                return true;
-            }
-
-            BreakPoint *const bp = _spiedProgram.getBreakPointAt((void *) (regs.rip - 1));
-            if (bp != nullptr) {
-                bp->hit(*this);
-                return true;
-            }
-
-            // Handle watchpoint
-            uint64_t dr6 = ptrace(PTRACE_PEEKUSER, _tid, offsetof(struct user, u_debugreg[6]), NULL);
-            if (dr6 == -1) {
-                std::cerr << "SpiedThread::handleSigTrap : PTRACE_PEEKUSER failed for thread << "
-                          << _tid << " : " << strerror(errno) << std::endl;
-                return true;
-            }
-
-            uint32_t idx;
-            for (idx = 0; idx < WatchPoint::maxNb; idx++) {
-                if (dr6 & (1 << idx)) break;
-            }
-
-            if (idx < _watchPoints.size()) {
-                // Clean dr6 register
-                dr6 &= ~(1 << idx);
-
-                if (ptrace(PTRACE_POKEUSER, _tid, offsetof(struct user, u_debugreg[6]), dr6) == -1) {
-                    std::cerr << "SpiedThread::handleSigTrap : PTRACE_POKEUSER failed for thread << "
-                              << _tid << " : " << strerror(errno) << std::endl;
-                }
-
-                WatchPoint &watchPoint = _watchPoints[idx].first;
-                watchPoint.hit();
-
-                return true;
-            }
-
-            // Handle unexpected SIGTRAP
-            Dl_info info;
-            if (dladdr((void *) (regs.rip - 1), &info) == 0) {
-                std::cerr << "SpiedThread::handleSigTrap : unexpected SIGTRAP for thread " << _tid << std::endl;
-            } else {
-                std::cout << "SpiedThread::handleSigTrap : SIGTRAP at " << info.dli_sname << " (" << info.dli_fname
-                          << ") for " << _tid << std::endl;
-            }
-            resume();
-
-            return false;
-        }, false);
-    } else {
+    if(_isSigTrapExpected){
         _isSigTrapExpected = false;
+        return true;
     }
 
-    return true;
+    // Handle thread creation
+    if ((wstatus >> 16) == PTRACE_EVENT_CLONE) {
+
+        unsigned long newThread;
+        _tracer.commandPTrace(true, PTRACE_GETEVENTMSG, _tid, nullptr, &newThread);
+
+        std::cout << "SpiedThread::handleSigTrap : thread " << _tid << " create new thread "
+                  << newThread << std::endl;
+
+        resume();
+        return true;
+    }
+    rip = getRip();
+    // Handle breakpoint
+    BreakPoint *const bp = _spiedProgram.getBreakPointAt((void *) (rip - 1));
+    if (bp != nullptr) {
+        bp->hit(*this);
+        return true;
+    }
+
+    // Handle watchpoint
+    uint64_t dr6 = _tracer.commandPTrace(true, PTRACE_PEEKUSER, _tid, offsetof(struct user, u_debugreg[6]), NULL);
+    if (dr6 == -1) {
+        std::cerr << "SpiedThread::handleSigTrap : PTRACE_PEEKUSER failed for thread << "
+                  << _tid << " : " << strerror(errno) << std::endl;
+        return true;
+    }
+
+    uint32_t idx;
+    for (idx = 0; idx < WatchPoint::maxNb; idx++) {
+        if (dr6 & (1 << idx)) break;
+    }
+
+    if (idx < _watchPoints.size()) {
+        // Clean dr6 register
+        dr6 &= ~(1 << idx);
+
+        if (_tracer.commandPTrace(true, PTRACE_POKEUSER, _tid, offsetof(struct user, u_debugreg[6]), dr6) == -1) {
+            std::cerr << "SpiedThread::handleSigTrap : PTRACE_POKEUSER failed for thread << "
+                      << _tid << " : " << strerror(errno) << std::endl;
+        }
+
+        _watchPoints[idx].first->hit();
+
+        return true;
+    }
+
+    // Handle unexpected SIGTRAP
+    Dl_info info;
+    if (dladdr((void *) (rip - 1), &info) == 0) {
+        std::cerr << "SpiedThread::handleSigTrap : unexpected SIGTRAP for thread " << _tid << std::endl;
+    } else {
+        std::cout << "SpiedThread::handleSigTrap : SIGTRAP at " << info.dli_sname << " (" << info.dli_fname
+                  << ") for " << _tid << std::endl;
+    }
+    resume();
+
+    return false;
 }
 
 WatchPoint *SpiedThread::createWatchPoint() {
@@ -221,7 +199,7 @@ WatchPoint *SpiedThread::createWatchPoint() {
 
     for(auto& wp : _watchPoints){
         if(!wp.second){
-            watchPoint = &wp.first;
+            watchPoint = wp.first.get();
             break;
         }
     }
@@ -231,7 +209,7 @@ WatchPoint *SpiedThread::createWatchPoint() {
 
 void SpiedThread::deleteWatchPoint(WatchPoint *watchPoint) {
     for (auto & wp : _watchPoints){
-        if(watchPoint == &wp.first){
+        if(watchPoint == wp.first.get()){
             watchPoint->unset();
             wp.second = false;
             break;
@@ -240,59 +218,111 @@ void SpiedThread::deleteWatchPoint(WatchPoint *watchPoint) {
 }
 
 bool SpiedThread::backtrace() {
-    return _tracer.command([this] {
-        // Get register
-        struct user_regs_struct regs{};
-        if (ptrace(PTRACE_GETREGS, _tid, NULL, &regs) == -1) {
-            std::cerr << "SpiedThread::backtrace : PTRACE_GETREGS failed for thread "
-                      << _tid << std::endl;
-            return false;
-        }
 
-        // Print thread current position
-        Dl_info info;
-        if (dladdr((void *) regs.rip, &info) == 0) {
-            std::cout << "SpiedThread::backtrace : thread " << _tid << " at " << (void *) regs.rip << std::endl;
+    // Get register
+    uint64_t rip = getRip();
+
+    // Print thread current position
+    Dl_info info;
+    if (dladdr((void *) rip, &info) == 0) {
+        std::cout << "SpiedThread::backtrace : thread " << _tid << " at " << (void *)rip << std::endl;
+    } else {
+        if (info.dli_sname != nullptr) {
+            std::cout << "SpiedThread::backtrace : thread " << _tid << " at " << info.dli_sname << " ("
+                      << info.dli_fname << ")" << std::endl;
+        } else {
+            std::cout << "thread " << _tid << " at " << (void *) rip
+                      << " (" << info.dli_fname << ")" << std::endl;
+            return true;
+        }
+    }
+
+    // Print call stack
+    auto rbp = (uint64_t *) getRbp();
+    while (rbp != nullptr) {
+        uint64_t retAddr = *(rbp + 1);
+        rbp = (uint64_t *) (*rbp);
+
+        if (dladdr((void *) retAddr, &info) == 0) {
+            break;
         } else {
             if (info.dli_sname != nullptr) {
-                std::cout << "SpiedThread::backtrace : thread " << _tid << " at " << info.dli_sname << " ("
-                          << info.dli_fname << ")" << std::endl;
+                std::cout << "\tfrom " << info.dli_sname << " (" << info.dli_fname << ")" << std::endl;
             } else {
-                std::cout << "thread " << _tid << " at " << (void *) regs.rip
-                          << " (" << info.dli_fname << ")" << std::endl;
-                return true;
+                std::cout << "\tfrom ?? (" << (void *) retAddr << ") (" << info.dli_fname << ")" << std::endl;
             }
         }
-
-        // Print call stack
-        auto rbp = (uint64_t *) regs.rbp;
-        while (rbp != nullptr) {
-            uint64_t retAddr = *(rbp + 1);
-            rbp = (uint64_t *) (*rbp);
-
-            if (dladdr((void *) retAddr, &info) == 0) {
-                break;
-            } else {
-                if (info.dli_sname != nullptr) {
-                    std::cout << "\tfrom " << info.dli_sname << " (" << info.dli_fname << ")" << std::endl;
-                } else {
-                    std::cout << "\tfrom ?? (" << (void *) retAddr << ") (" << info.dli_fname << ")" << std::endl;
-                }
-            }
-        }
-        return true;
-    }, false);
+    }
+    return true;
 }
 
 bool SpiedThread::detach() {
-    return _tracer.command([this] {
-        bool res = true;
-        if (ptrace(PTRACE_DETACH, _tid, 0, 0) == -1) {
-            res = false;
-            std::cerr << "SpiedThread::detach : PTRACE_DETACH failed for thread " << _tid << " : "
-                      << strerror(errno) << std::endl;
+    bool res = true;
+    if (_tracer.commandPTrace(true, PTRACE_DETACH, _tid, 0, 0) == -1) {
+        res = false;
+        std::cerr << "SpiedThread::detach : PTRACE_DETACH failed for thread " << _tid << " : "
+                  << strerror(errno) << std::endl;
+    }
+    return res;
+}
+
+uint64_t SpiedThread::getRip() {
+    uint64_t rip = 0U;
+
+    getRegisters();
+
+    if(!_isRegsDirty){
+        rip = _regs.rip;
+    }
+    return rip;
+}
+
+uint64_t SpiedThread::getRbp() {
+    uint64_t rbp = 0U;
+
+    getRegisters();
+
+    if(!_isRegsDirty){
+        rbp = _regs.rbp;
+    }
+    return rbp;
+}
+
+void SpiedThread::setRip(uint64_t rip) {
+    std::lock_guard lk(_stateMutex);
+    getRegisters();
+
+    if(!_isRegsDirty){
+        _isRegsModified = true;
+        _regs.rip = rip;
+    }
+}
+
+void SpiedThread::setRegisters() {
+    std::lock_guard lk(_stateMutex);
+
+    if(_isRegsModified){
+        if(_tracer.commandPTrace(false, PTRACE_SETREGS, _tid, NULL, &_regs) == -1) {
+            std::cerr << __FUNCTION__ << ": PTRACE_SETREGS failed for thread "
+                      << _tid << std::endl;
+            return;
         }
-        return res;
-    });
+        _isRegsModified = false;
+    }
+}
+
+void SpiedThread::getRegisters() {
+    std::lock_guard lk(_stateMutex);
+
+    if(_state != STOPPED) return;
+
+    if(_isRegsDirty){
+        if (_tracer.commandPTrace(true, PTRACE_GETREGS, _tid, NULL, &_regs) == -1) {
+            std::cerr << __FUNCTION__ <<" : PTRACE_GETREGS failed : " << strerror(errno) << std::endl;
+            return;
+        }
+        _isRegsDirty = false;
+    }
+    _isRegsModified = true;
 }
 

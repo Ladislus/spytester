@@ -28,6 +28,7 @@ class WrappedFunction : public AbstractWrappedFunction{
     using FctType = decltype(std::function{std::declval<FctPtrType>()});
 
     static FctType _sWrapper;
+    static std::mutex _wrapperMutex;
 
     template< typename TRET, typename ... TARGS>
     static FctPtrType getWrapperFctPtr(TRET(*fct)(TARGS ...));
@@ -49,10 +50,15 @@ template<auto faddr>
 typename WrappedFunction<faddr>::FctType WrappedFunction<faddr>::_sWrapper;
 
 template<auto faddr>
+std::mutex WrappedFunction<faddr>::_wrapperMutex;
+
+template<auto faddr>
 template<typename TRET, typename ... TARGS>
 typename WrappedFunction<faddr>::FctPtrType
 WrappedFunction<faddr>::getWrapperFctPtr(TRET(*fct)(TARGS ...)) {
     return [](TARGS ... args) noexcept {
+        std::lock_guard lk(_wrapperMutex);
+
         try {
             return _sWrapper(args ...);
         } catch (const std::bad_function_call& e){
@@ -64,6 +70,8 @@ WrappedFunction<faddr>::getWrapperFctPtr(TRET(*fct)(TARGS ...)) {
 
 template<auto faddr>
 void WrappedFunction<faddr>::setWrapper(FctType&& wrapper){
+    std::lock_guard lk(_wrapperMutex);
+
     _sWrapper = wrapper;
 }
 
@@ -118,24 +126,22 @@ _handle(handle){
 
 template<auto faddr>
 bool WrappedFunction<faddr>::wrapping(bool active){
-    return _tracer.command([this, active]{
-        bool res = true;
-        void* addr = active ? _wrapperAddr : (void*)faddr;
+    bool res = true;
+    void* addr = active ? _wrapperAddr : (void*)faddr;
 
-        if(_relaAddr != nullptr){
-            if (ptrace(PTRACE_POKEDATA, _tracer.getTraceePid(), _relaAddr, addr) == -1) {
-                std::cout << "WrappedFunction::wrap : PTRACE_POKEDATA failed : " << strerror(errno) << std::endl;
-                res = false;
-            }
+    if(_relaAddr != nullptr){
+        if (_tracer.commandPTrace(true, PTRACE_POKEDATA, _tracer.getTraceePid(), _relaAddr, addr) == -1) {
+            std::cout << "WrappedFunction::wrap : PTRACE_POKEDATA failed : " << strerror(errno) << std::endl;
+            res = false;
         }
+    }
 
-        return res;
-    });
+    return res;
 }
 
 template<auto faddr>
 WrappedFunction<faddr>::~WrappedFunction(){
-    wrapping(false);
+    _tracer.commandPTrace(false, PTRACE_POKEDATA, _tracer.getTraceePid(), _relaAddr, (void*)faddr);
 }
 
 #endif //SPYTESTER_WRAPPEDFUNCTION_H

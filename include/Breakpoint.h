@@ -39,8 +39,6 @@ private:
     bool _isSet;
     Tracer& _tracer;
 
-    bool prepareToResume(SpiedThread& spiedThread);
-
     // callback function
     std::function<void (BreakPoint&, SpiedThread&)> _onHit;
 

@@ -10,11 +10,17 @@
 #include <dlfcn.h>
 
 #define gettid() syscall(SYS_gettid)
+#define tgkill(tgid, tid, sig) syscall(SYS_tgkill, tgid, tid, sig)
 
 Tracer::Tracer(SpiedProgram &spiedProgram)
 : _spiedProgram(spiedProgram), _state(NOT_STARTED)
 {
     if(sem_init(&_cmdsSem, 0, 0) == -1){
+        std::cerr << __FUNCTION__ << " : semaphore initialization failed : " << strerror(errno) << std::endl;
+        throw std::invalid_argument("invalid sem init");
+    }
+
+    if(sem_init(&_callbackSem, 0, 0) == -1){
         std::cerr << __FUNCTION__ << " : semaphore initialization failed : " << strerror(errno) << std::endl;
         throw std::invalid_argument("invalid sem init");
     }
@@ -52,29 +58,29 @@ void Tracer::initTracer() {
 
     // Create spied program process
     int cloneFlags = CLONE_FS | CLONE_FILES | SIGCHLD | CLONE_VM;
-    _starterTid = clone(preStarter, _spiedProgram.getStackTop(), cloneFlags, this);
+    _traceePid = clone(preStarter, _spiedProgram.getStackTop(), cloneFlags, this);
 
-    if(_starterTid == -1){
+    if(_traceePid == -1){
         std::cerr << __FUNCTION__ <<" : clone failed : "<< strerror(errno) <<std::endl;
         return;
     }
 
     // Wait for spied program process to be created
     int wstatus;
-    if(waitpid(_starterTid, &wstatus, 0) == -1){
+    if(waitpid(_traceePid, &wstatus, 0) == -1){
         std::cerr << "waitpid failed : " << strerror(errno) << std::endl;
     }
     if (WIFSTOPPED(wstatus)){
-        if(ptrace(PTRACE_SETOPTIONS, _starterTid, nullptr, PTRACE_O_TRACECLONE | PTRACE_O_TRACEFORK) == -1){
+        if(ptrace(PTRACE_SETOPTIONS, _traceePid, nullptr, PTRACE_O_TRACECLONE | PTRACE_O_TRACEFORK) == -1){
             std::cerr << __FUNCTION__ <<" : PTRACE_O_TRACECLONE failed : "<< strerror(errno) <<std::endl;
         }
-        if(ptrace(PTRACE_CONT, _starterTid, nullptr, nullptr) == -1){
+        if(ptrace(PTRACE_CONT, _traceePid, nullptr, nullptr) == -1){
             std::cerr << __FUNCTION__ <<" : PTRACE_CONT failed for starter" << std::endl;
         }
     }
 
     // Wait for pre starter to create starter thread
-    if(waitpid(_starterTid, &wstatus, 0) == -1){
+    if(waitpid(_traceePid, &wstatus, 0) == -1){
         std::cerr << __FUNCTION__ << " : waitpid failed (create starter): " << strerror(errno) << std::endl;
     }
 
@@ -119,11 +125,23 @@ void *Tracer::starter(void *param) {
 void * Tracer::eventHandler(void* tracer) {
     auto t = (Tracer *) tracer;
     if (t == nullptr) {
-        std::cerr << __FUNCTION__ << " : unexpected pid " << getpid() << std::endl;
+        std::cerr << __FUNCTION__ << " : tracer is nullptr" << std::endl;
         return nullptr;
     }
 
     t->handleEvent();
+
+    return nullptr;
+}
+
+void * Tracer::callbackHandler(void *tracer) {
+    auto t = (Tracer *) tracer;
+    if(t == nullptr){
+        std::cerr << __FUNCTION__ << " : tracer is nullptr" << std::endl;
+        return nullptr;
+    }
+
+    t->handleCallback();
 
     return nullptr;
 }
@@ -160,26 +178,40 @@ void Tracer::handleCommand() {
 void Tracer::handleEvent() {
     std::cout << __FUNCTION__ << " : start handling events!" << std::endl;
 
+    int ret = pthread_create(&_callbackHandler, &_attr, &callbackHandler, this);
+    if(ret != 0){
+        std::cerr << __FUNCTION__ << " : failed to create callback handler : " << strerror(ret) << std::endl;
+    }
+
     int wstatus;
     pid_t tid;
     // Wait until all child threads exit
     while((tid = waitpid(-1, &wstatus, WCONTINUED)) > 0)
     {
         // Ignore starterThread
-        if(tid == _starterTid) continue;
+        if(tid == _traceePid) continue;
 
         SpiedThread &thread = _spiedProgram.getSpiedThread(tid);
 
         if (WIFSTOPPED(wstatus)) {
             int signum = WSTOPSIG(wstatus);
             thread.setState(SpiedThread::STOPPED, signum);
-
             std::cout << __FUNCTION__ << " : thread " << tid << " stopped : SIG = " << signum << std::endl;
+
             switch (signum) {
                 case SIGTRAP:
-                    thread.handleSigTrap(wstatus);
+                    executeCallback([&thread, wstatus]{
+                        thread.handleSigTrap(wstatus);
+                    });
+                    break;
+                case SIGSEGV:
+                    std::cerr << __FUNCTION__ <<" "<< tid <<" : segfault at " << (void*)thread.getRip() << std::endl;
+                    break;
+                case SIGSTOP:
+                case SIGTERM:
                     break;
                 default:
+                    std::cerr << __FUNCTION__ <<" "<< tid << " : unexpect signal "<< signum << " at " << (void*)thread.getRip() << std::endl;
                     break;
             }
         } else if (WIFCONTINUED(wstatus)) {
@@ -200,7 +232,29 @@ void Tracer::handleEvent() {
     std::cout << __FUNCTION__ << ": stop handling events!" << std::endl;
 
     // Wakeup command handler
+    sem_post(&_callbackSem);
     sem_post(&_cmdsSem);
+}
+
+
+void Tracer::handleCallback() {
+    while(sem_wait(&_callbackSem) == 0){
+        if(_state == STOPPING){
+            break;
+        }
+
+        _callbackMutex.lock();
+        if(!_callbacks.empty()){
+            auto& callback = _callbacks.front();
+            _callbackMutex.unlock();
+
+            callback();
+
+            _callbackMutex.lock();
+            _callbacks.pop();
+        }
+        _callbackMutex.unlock();
+    }
 }
 
 void Tracer::start() {
@@ -213,54 +267,8 @@ void Tracer::start() {
     }
 }
 
-bool Tracer::command(std::function<bool()> &&cmd, bool sync) {
-    bool res = false;
-
-    if(gettid() == _tracerTid) {
-        res = cmd();
-    } else if(sync) {
-        std::condition_variable cmdResCV;
-        std::mutex cmdResMutex;
-
-        std::unique_lock lk(cmdResMutex);
-        bool cmdExecuted = false;
-
-        _cmdsMutex.lock();
-
-        if(_state != TRACING && _state != STARTING){
-            _cmdsMutex.unlock();
-            return false;
-        }
-
-        _commands.emplace([&cmdResMutex, &cmdResCV, &cmd, &res, &cmdExecuted]() {
-            cmdResMutex.lock();
-
-            res = cmd();
-            cmdExecuted = true;
-
-            cmdResMutex.unlock();
-            cmdResCV.notify_all();
-
-            return res;
-        });
-        _cmdsMutex.unlock();
-        sem_post(&_cmdsSem);
-
-        cmdResCV.wait(lk, [&cmdExecuted] { return cmdExecuted; });
-    } else {
-        _cmdsMutex.lock();
-        _commands.emplace(std::move(cmd));
-        _cmdsMutex.unlock();
-        sem_post(&_cmdsSem);
-
-        res = true;
-    }
-
-    return res;
-}
-
 pid_t Tracer::getTraceePid() const {
-    return _starterTid;
+    return _traceePid;
 }
 
 bool Tracer::isTracerThread() const {
@@ -283,9 +291,34 @@ Tracer::~Tracer() {
 
     pthread_join(_cmdHandler, nullptr);
     pthread_join(_evtHandler, nullptr);
+    pthread_join(_callbackHandler, nullptr);
     pthread_join(_starter, nullptr);
     pthread_attr_destroy(&_attr);
     sem_destroy(&_cmdsSem);
+    sem_destroy(&_callbackSem);
 
     std::cout<< __FUNCTION__ << std::endl;
+}
+
+void Tracer::executeCallback(std::function<void()>&& callback) {
+    _callbackMutex.lock();
+    _callbacks.push(callback);
+    _callbackMutex.unlock();
+
+    sem_post(&_callbackSem);
+}
+
+int Tracer::tkill(pid_t tid, int sig) {
+    _cmdsMutex.lock();
+    _commands.emplace([this, tid, sig]{
+        if(tgkill(_traceePid, tid, sig) == -1){
+            std::cerr << "tgkill("<< tid <<", "<<sig<<") failed : " << strerror(errno) << std::endl;
+        }
+        return true;
+    });
+    _cmdsMutex.unlock();
+
+    sem_post(&_cmdsSem);
+
+    return 0;
 }

@@ -41,6 +41,7 @@ private:
 
     std::function<void(SpiedThread&)> _onThreadStart;
     std::function<void(SpiedThread&)> _onThreadExit;
+    std::mutex _callbackMutex;
     SpiedThread& getSpiedThread(pid_t tid);
 
 public:

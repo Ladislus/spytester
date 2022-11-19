@@ -31,7 +31,7 @@ public:
     } E_Size;
 
     WatchPoint(Tracer &tracer, SpiedThread &spiedThread, uint32_t idx);
-    ~WatchPoint();
+    ~WatchPoint() = default;
 
     void* getAddr();
     bool isSet() const;
@@ -48,7 +48,7 @@ private:
     bool _isSet;
     const uint32_t _idx;
     void* _addr;
-
+    std::mutex _callbackMutex;
     std::function<void(WatchPoint &, SpiedThread &)> _onHit;
 
 

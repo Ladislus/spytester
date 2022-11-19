@@ -61,6 +61,10 @@ SpiedProgram::SpiedProgram(std::string &&progName, int argc, char *argv, char *e
 }
 
 SpiedProgram::~SpiedProgram(){
+    _wrappedFunctions.clear();
+    _breakPoints.clear();
+    _spiedThreads.clear();
+
     delete _tracer;
     std::cout << __FUNCTION__ << std::endl;
 }
@@ -84,8 +88,8 @@ void SpiedProgram::stop(){
 }
 
 void SpiedProgram::terminate() {
-    for(auto & spiedThread : _spiedThreads){
-        spiedThread->terminate();
+    if(!_spiedThreads.empty()){
+        _spiedThreads.front()->terminate();
     }
 }
 
@@ -146,7 +150,11 @@ SpiedThread &SpiedProgram::getSpiedThread(pid_t tid) {
     // Register new thread
     if(spiedThread == nullptr){
         _spiedThreads.emplace_back(std::make_unique<SpiedThread>(*this, *_tracer, tid));
+
+        _callbackMutex.lock();
         _onThreadStart(*_spiedThreads.back());
+        _callbackMutex.unlock();
+
         spiedThread = _spiedThreads.back().get();
     }
 
@@ -154,6 +162,8 @@ SpiedThread &SpiedProgram::getSpiedThread(pid_t tid) {
 }
 
 void SpiedProgram::setOnThreadStart(std::function<void(SpiedThread &)>&& onThreadStart) {
+    std::lock_guard lk(_callbackMutex);
+
     _onThreadStart = onThreadStart;
 }
 
@@ -221,14 +231,12 @@ bool SpiedProgram::relink(std::string &&libName) {
                         (ELF64_R_TYPE(rela->r_info) == R_X86_64_JUMP_SLOT))
                     {
                         auto relaAddr = (uint64_t *) (rela->r_offset + baseAddr);
-                        _tracer->command([this, symAddr, relaAddr] {
-                            if (ptrace(PTRACE_POKEDATA, _tracer->getTraceePid(), relaAddr, symAddr) == -1) {
-                                std::cerr << "SpiedProgram::relink : PTRACE_POKEDATA failed : "
-                                          << strerror(errno) << std::endl;
-                                return false;
-                            }
-                            return true;
-                        });
+                        if (_tracer->commandPTrace(true, PTRACE_POKEDATA, _tracer->getTraceePid(),
+                                                   relaAddr, symAddr) == -1)
+                        {
+                            std::cerr << "SpiedProgram::relink : PTRACE_POKEDATA failed : "
+                                      << strerror(errno) << std::endl;
+                        }
 
                         std::cout << "SpiedProgram::relink : " << symName << " relinked" << std::endl;
                     } else {
