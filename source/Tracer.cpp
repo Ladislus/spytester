@@ -54,8 +54,6 @@ void * Tracer::commandHandler(void * tracer) {
 }
 
 void Tracer::initTracer() {
-    _tracerTid = gettid();
-
     // Create spied program process
     int cloneFlags = CLONE_FS | CLONE_FILES | SIGCHLD | CLONE_VM;
     _traceePid = clone(preStarter, _spiedProgram.getStackTop(), cloneFlags, this);
@@ -152,6 +150,8 @@ void Tracer::handleCommand() {
 
     while(sem_wait(&_cmdsSem) == 0)
     {
+        if(_state == STOPPED) break;
+
         //Get next command to execute
         _cmdsMutex.lock();
         while(!_commands.empty()) {
@@ -162,11 +162,6 @@ void Tracer::handleCommand() {
 
             _cmdsMutex.lock();
             _commands.pop();
-        }
-        if(_state == STOPPING){
-            // At this point we know the queue is empty, so we can stop handling command
-            _cmdsMutex.unlock();
-            break;
         }
         _cmdsMutex.unlock();
     }
@@ -228,23 +223,19 @@ void Tracer::handleEvent() {
         }
     }
 
-    setState(STOPPING);
+    setState(STOPPED);
     std::cout << __FUNCTION__ << ": stop handling events!" << std::endl;
 
-    // Wakeup command handler
+    // Wake up command and callback handlers
     sem_post(&_callbackSem);
     sem_post(&_cmdsSem);
 }
 
-
 void Tracer::handleCallback() {
     while(sem_wait(&_callbackSem) == 0){
-        if(_state == STOPPING){
-            break;
-        }
 
         _callbackMutex.lock();
-        if(!_callbacks.empty()){
+        while(!_callbacks.empty()){
             auto& callback = _callbacks.front();
             _callbackMutex.unlock();
 
@@ -254,7 +245,17 @@ void Tracer::handleCallback() {
             _callbacks.pop();
         }
         _callbackMutex.unlock();
+
+        if(_state == STOPPED) break;
     }
+}
+
+void Tracer::executeCallback(std::function<void()>&& callback) {
+    _callbackMutex.lock();
+    _callbacks.push(callback);
+    _callbackMutex.unlock();
+
+    sem_post(&_callbackSem);
 }
 
 void Tracer::start() {
@@ -265,47 +266,6 @@ void Tracer::start() {
     else{
         std::cout << __FUNCTION__ << " : tracer has already been started " << std::endl;
     }
-}
-
-pid_t Tracer::getTraceePid() const {
-    return _traceePid;
-}
-
-bool Tracer::isTracerThread() const {
-    return gettid() == _tracerTid;
-}
-
-void Tracer::setState(Tracer::E_State state) {
-    _stateMutex.lock();
-    _state = state;
-    _stateMutex.unlock();
-    _stateCV.notify_all();
-}
-
-Tracer::~Tracer() {
-    std::unique_lock lk(_stateMutex);
-    if(_state != STOPPED){
-        // wait for tracing to be stopped
-        _stateCV.wait(lk, [this](){return _state==STOPPED;});
-    }
-
-    pthread_join(_cmdHandler, nullptr);
-    pthread_join(_evtHandler, nullptr);
-    pthread_join(_callbackHandler, nullptr);
-    pthread_join(_starter, nullptr);
-    pthread_attr_destroy(&_attr);
-    sem_destroy(&_cmdsSem);
-    sem_destroy(&_callbackSem);
-
-    std::cout<< __FUNCTION__ << std::endl;
-}
-
-void Tracer::executeCallback(std::function<void()>&& callback) {
-    _callbackMutex.lock();
-    _callbacks.push(callback);
-    _callbackMutex.unlock();
-
-    sem_post(&_callbackSem);
 }
 
 int Tracer::tkill(pid_t tid, int sig) {
@@ -321,4 +281,31 @@ int Tracer::tkill(pid_t tid, int sig) {
     sem_post(&_cmdsSem);
 
     return 0;
+}
+
+pid_t Tracer::getTraceePid() const {
+    return _traceePid;
+}
+
+void Tracer::setState(Tracer::E_State state) {
+    _stateMutex.lock();
+    _state = state;
+    _stateMutex.unlock();
+    _stateCV.notify_all();
+}
+
+Tracer::~Tracer() {
+    if(_state != STOPPED) tkill(_traceePid, SIGKILL);
+
+    pthread_join(_evtHandler, nullptr);
+    pthread_join(_callbackHandler, nullptr);
+    pthread_join(_cmdHandler, nullptr);
+    pthread_join(_starter, nullptr);
+
+    pthread_attr_destroy(&_attr);
+
+    sem_destroy(&_cmdsSem);
+    sem_destroy(&_callbackSem);
+
+    std::cout<< __FUNCTION__ << std::endl;
 }

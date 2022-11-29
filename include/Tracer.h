@@ -26,7 +26,7 @@ extern "C" {
 class Tracer {
 public :
 
-    Tracer(SpiedProgram &spiedProgram);
+    explicit Tracer(SpiedProgram &spiedProgram);
     Tracer(const Tracer&) = delete;
     Tracer(Tracer&&) = delete;
     ~Tracer();
@@ -34,7 +34,6 @@ public :
     void start();
 
     pid_t getTraceePid() const;
-    bool isTracerThread() const;
 
     template<typename ... Args>
     long commandPTrace(bool sync, enum __ptrace_request request, Args ... args);
@@ -47,7 +46,6 @@ private:
         NOT_STARTED,
         STARTING,
         TRACING,
-        STOPPING,
         STOPPED,
     } E_State;
 
@@ -59,7 +57,6 @@ private:
 
     SpiedProgram& _spiedProgram;
 
-    pid_t _tracerTid;
     pid_t _traceePid;
     pid_t _traceeTid;
 
@@ -76,6 +73,7 @@ private:
 
     sem_t _callbackSem;
     std::mutex _callbackMutex;
+
     sem_t _cmdsSem;
     std::mutex _cmdsMutex;
 

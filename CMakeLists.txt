@@ -23,7 +23,8 @@ target_link_libraries(ThreadIdExe SpyTester ThreadIdLib)
 
 # Tested executables
 add_executable(TestProgram test/BasicTest/TestProgram.cpp)
-target_compile_options(TestProgram PRIVATE -fPIC )
+target_compile_options(TestProgram PRIVATE -fPIC)
+target_link_options(TestProgram PRIVATE -rdynamic)
 target_link_libraries(TestProgram pthread TestLib)
 
 add_executable(ThreadIdProgram test/ThreadIdentification/TestedExe.cpp)
