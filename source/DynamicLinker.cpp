@@ -36,3 +36,31 @@ void* getDefinition(void* handle, const char* symName){
 
     return sym;
 }
+
+void* getDynSymbolAddrIn(void* addr, Lmid_t lmid){
+    Dl_info info;
+
+    if (dladdr(addr, &info) == 0){
+        std::cerr << __FUNCTION__ <<" : dladdr failed on " << addr <<" : " << dlerror() << std::endl;
+        return nullptr;
+    }
+
+    if(info.dli_saddr != addr){
+        std::cerr << __FUNCTION__ <<" : " << addr << "is not a valid function pointer " << std::endl;
+        return nullptr;
+    }
+
+    void* handle = dlmopen(lmid, info.dli_fname, RTLD_NOLOAD | RTLD_LAZY);
+
+    if(handle == nullptr){
+        std::cerr << __FUNCTION__ <<" : dlmopen failed : " << dlerror() << std::endl;
+        return nullptr;
+    }
+
+    void* retAddr = dlsym(handle, info.dli_sname);
+    if(retAddr == nullptr){
+        std::cerr << __FUNCTION__ <<" : dlsym failed : "<<dlerror() << std::endl;
+    }
+
+    return retAddr;
+}

@@ -61,7 +61,6 @@ SpiedProgram::SpiedProgram(std::string &&progName, int argc, char *argv, char *e
 }
 
 SpiedProgram::~SpiedProgram(){
-    _wrappedFunctions.clear();
     _breakPoints.clear();
     _spiedThreads.clear();
 

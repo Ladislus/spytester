@@ -40,7 +40,7 @@ int main(int argc, char* argv[], char* envp[])
         sleep(1);
 
         auto f = prog.wrapFunction<testLibFunction>("TestProgram");
-        WrappedFunction<testLibFunction>::setWrapper([](int a){
+        f->setWrapper([](int a){
             std::cout<< "HELLO!" <<std::endl;
             testLibFunction(a);
             return a+2;
@@ -61,6 +61,8 @@ int main(int argc, char* argv[], char* envp[])
                          });
             wp->set((void*)&b, WatchPoint::READ_WRITE, WatchPoint::_4BYTES);
         }
+
+        f->wrapping(false);
 
         prog.resume();
 

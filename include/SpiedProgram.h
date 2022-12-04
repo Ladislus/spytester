@@ -63,7 +63,7 @@ public:
                                  std::string&& name = "BreakPoint" + std::to_string(breakPointCounter++));
 
     template<auto faddr>
-    AbstractWrappedFunction* wrapFunction(std::string&& binName);
+    WrappedFunction<faddr>* wrapFunction(std::string&& binName);
 
     template<auto faddr>
     void unwrapFunction(std::string&& binName);
@@ -75,21 +75,27 @@ public:
 };
 
 template<auto faddr>
-AbstractWrappedFunction* SpiedProgram::wrapFunction(std::string &&binName) {
-    AbstractWrappedFunction* wrappedFunction = nullptr;
+WrappedFunction<faddr>* SpiedProgram::wrapFunction(std::string &&binName) {
+    WrappedFunction<faddr>* wrappedFunction = nullptr;
+
     void* handle = dlmopen(_lmid, binName.c_str(), RTLD_NOLOAD | RTLD_NOW);
 
-    if(handle == nullptr){
+    if(handle == nullptr) {
         std::cerr << __FUNCTION__ << " : dlopen failed for " << handle << " : " << dlerror() << std::endl;
-    } else try {
-        _wrappedFunctions.try_emplace(
-                std::make_pair((void*)faddr, handle),
-                std::make_unique<WrappedFunction<faddr>>(*_tracer, handle)
-        );
-        wrappedFunction = _wrappedFunctions[std::make_pair((void*)faddr, handle)].get();
+        return nullptr;
+    }
 
-    } catch(const std::invalid_argument& e) {
-        std::cerr << __FUNCTION__ <<" : WrappedFunction construction failed : " << e.what() << std::endl;
+    auto it = _wrappedFunctions.find({(void*)faddr, handle});
+    if( it == _wrappedFunctions.end() ){
+        void* addr   = getDynSymbolAddrIn((void*)faddr, _lmid);
+
+        if (addr != nullptr){
+            auto uniquePtr = std::make_unique<WrappedFunction<faddr>>(*_tracer, addr, handle);
+            wrappedFunction = uniquePtr.get();
+            _wrappedFunctions[{(void*)faddr, handle}] = std::move(uniquePtr);
+        }
+    } else {
+        wrappedFunction = dynamic_cast<WrappedFunction<faddr>*>(it->second.get());
     }
 
     return wrappedFunction;
