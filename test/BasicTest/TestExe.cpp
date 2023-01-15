@@ -19,7 +19,9 @@ int main(int argc, char* argv[], char* envp[])
     }
 
     try{
-        SpiedProgram prog(argv[1], argc - 1, argv[1], envp[0]);
+        std::string holi("holi");
+
+        SpiedProgram prog(argv[1], "hola", holi);
 
         prog.relink("libTestLib.so");
         std::cout << "testLibFunction = " << (void*)&testLibFunction << std::endl;
@@ -71,7 +73,6 @@ int main(int argc, char* argv[], char* envp[])
         prog.terminate();
     }
     catch(const std::invalid_argument& e){
-        sleep(10);
         std::cerr << "SpiedProgram failed : " << e.what() << std::endl;
         std::exit(1);
     }

@@ -20,7 +20,7 @@
 class SpiedProgram;
 
 extern "C" {
-    extern void _asm_starter(void*, uint64_t, char*, char*);
+    extern void _asm_starter(void*, uint64_t, const char*, const char*);
 };
 
 class Tracer {

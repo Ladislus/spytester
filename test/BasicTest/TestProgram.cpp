@@ -37,6 +37,11 @@ void* TestPthreadFunction(void* arg)
 int main(int argc, char* argv[], char* envp[])
 {
     std::cout << argv[0] << " ("<< getpid() <<") : started!" << std::endl;
+    std::cout << "parameters("<<argc<<") = ";
+    for(int i = 0; i < argc; i++ ){
+        std::cout << argv[i] << " ; ";
+    }
+    std::cout << std::endl;
 
     TestFunction();
     (void)TestFunction2();

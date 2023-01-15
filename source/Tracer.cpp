@@ -7,9 +7,9 @@
 #include "../include/SpiedProgram.h"
 
 #include <sys/syscall.h>
+#define gettid() syscall(SYS_gettid)
 #include <dlfcn.h>
 
-#define gettid() syscall(SYS_gettid)
 #define tgkill(tgid, tid, sig) syscall(SYS_tgkill, tgid, tid, sig)
 
 Tracer::Tracer(SpiedProgram &spiedProgram)
@@ -115,7 +115,43 @@ int Tracer::preStarter(void * tracer) {
 void *Tracer::starter(void *param) {
     auto progParam = (struct ProgParam *) param;
 
-    _asm_starter(progParam->entryPoint, progParam->argc, progParam->argv, progParam->envp);
+    //_asm_starter(progParam->entryPoint, progParam->argc, progParam->argv, progParam->envp);
+    uint64_t* sp;
+    __asm__ volatile (" movq %%rsp, %0" : "=r"(sp)::);
+
+    // Push environment pointers onto stack
+    char** env = progParam->envp;
+    for(; *env != nullptr; env++); // set env point to the last environment variable
+
+    sp--;
+    *sp = 0LU;
+
+    for(; env >= progParam->envp; env--){
+        sp--;
+        *sp = (uint64_t)*env;
+    }
+
+    // Push argument pointers onto the stack
+    sp--;
+    *sp = 0LU;
+
+    for(int i = progParam->argc - 1; i>=0; i--){
+        sp--;
+        *sp = (uint64_t)progParam->argv[i];
+    }
+
+    // Push argc onto the stack
+    sp--;
+    *sp = progParam->argc;
+
+    //std::cout << "HOLA" << std::endl;
+
+    __asm__ volatile(
+          "xor %%rbp, %%rbp \n"
+          "xor %%rdx, %%rdx \n"
+          "movq %0, %%rsp \n"
+          "jmp *%1 \n"
+          ::"r"(sp), "r"(progParam->entryPoint): "%rdx", "%rbp");
 
     return nullptr;
 }

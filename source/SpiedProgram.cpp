@@ -1,63 +1,20 @@
 #include "../include/SpiedProgram.h"
-#include "../include/DynamicLinker.h"
 
 #include <dlfcn.h>
-#include <sys/mman.h>
 
 #include <cstring>
 #include <iostream>
 
-static const size_t stackSize = 1<<23;
-
 uint32_t SpiedProgram::breakPointCounter = 0;
 
-void defaultOnAddThread(SpiedThread& spiedThread)
+void SpiedProgram::defaultOnAddThread(SpiedThread& spiedThread)
 {
     std::cout << "New thread "<< spiedThread.getTid() <<" created" <<std::endl;
 }
 
-void defaultOnRemoveThread(SpiedThread& spiedThread)
+void SpiedProgram::defaultOnRemoveThread(SpiedThread& spiedThread)
 {
     std::cout << "Thread "<< spiedThread.getTid() <<" deleted" <<std::endl;
-}
-
-SpiedProgram::SpiedProgram(std::string &&progName, int argc, char *argv, char *envp)
-: _progName(progName), _onThreadStart(defaultOnAddThread), _onThreadExit(defaultOnRemoveThread), _lmid(0) {
-
-    _progParam.argc = (uint64_t) argc;
-    _progParam.argv = argv;
-    _progParam.envp = envp;
-
-    _handle = dlmopen(LM_ID_NEWLM, _progName.c_str(), RTLD_NOW);
-    if (_handle == nullptr) {
-        std::cerr << __FUNCTION__ << " : dlopen failed for " << _progName << " : " << dlerror() << std::endl;
-        throw std::invalid_argument("Invalid program name");
-    }
-
-    if (dlinfo(_handle, RTLD_DI_LMID, &_lmid) == -1){
-        std::cerr << __FUNCTION__ << " : dlinfo failed RTLD_DI_LMID : " << dlerror() << std::endl;
-        throw std::invalid_argument("Failed to get new link map id");
-    }
-
-    struct link_map* lm;
-    if (dlinfo(_handle, RTLD_DI_LINKMAP, &lm) == -1) {
-        std::cerr << __FUNCTION__ << " : dlinfo failed RTLD_DI_LINKMAP : " << dlerror() << std::endl;
-        throw std::invalid_argument("Failed to get link map ");
-    }
-
-    auto elfHdr = (Elf64_Ehdr*)lm->l_addr;
-    Elf64_Addr baseAddr = lm->l_addr;
-    _progParam.entryPoint = (void*)(baseAddr + elfHdr->e_entry);
-
-    _stack = mmap(nullptr, stackSize, PROT_READ | PROT_WRITE,
-                      MAP_PRIVATE | MAP_ANONYMOUS | MAP_STACK, -1, 0);
-    if (_stack == MAP_FAILED) {
-        std::cerr << __FUNCTION__ << " : stack allocation failed : " << strerror(errno) << std::endl;
-        dlclose(_handle);
-        throw std::invalid_argument("Cannot allocate stack");
-    }
-
-    _tracer = new Tracer(*this);
 }
 
 SpiedProgram::~SpiedProgram(){
@@ -65,6 +22,7 @@ SpiedProgram::~SpiedProgram(){
     _spiedThreads.clear();
 
     delete _tracer;
+    dlclose(_handle);
     std::cout << __FUNCTION__ << std::endl;
 }
 
