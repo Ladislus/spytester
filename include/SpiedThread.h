@@ -6,7 +6,9 @@
 #include <mutex>
 #include <condition_variable>
 #include <sys/user.h>
+#include <future>
 #include "WatchPoint.h"
+#include "CallbackHandler.h"
 
 class Tracer;
 class SpiedProgram;
@@ -15,26 +17,25 @@ class SpiedThread {
 public:
 
     typedef enum {
+        UNDETERMINED,
         STOPPED,
-        RUNNING,
-        TERMINATED
+        CONTINUED,
+        TERMINATED,
+        EXITED
     } E_State;
 
-    SpiedThread(SpiedProgram& spiedProgram, Tracer& tracer, pid_t tid);
+    SpiedThread(Tracer &tracer, CallbackHandler &callbackHandler, pid_t tid);
     SpiedThread(SpiedThread&& spiedThread) = delete;
     SpiedThread(const SpiedThread& ) = delete;
     ~SpiedThread();
 
     pid_t getTid() const;
 
-    void setState(E_State state, int code = 0);
+    void setState(E_State state);
 
-    bool handleSigTrap(int wstatus);
-    void handleSigStop();
+    bool handleEvent(E_State state, int signal, int status);
 
-    uint64_t getRip();
-    uint64_t getRbp();
-    void setRip(uint64_t rip);
+    void jump(void* addr);
 
     bool resume(int signum = 0);
     bool singleStep();
@@ -44,31 +45,49 @@ public:
     bool backtrace();
     bool detach();
 
+    uint64_t getRip();
+
+    inline bool operator==(pid_t tid) const{
+        return tid == _tid;
+    }
+
     WatchPoint* createWatchPoint();
     void deleteWatchPoint(WatchPoint* watchPoint);
 
 private:
-    void setRegisters();
-    void getRegisters();
+    typedef enum {
+        OLD,
+        SYNC,
+        NEW
+    } E_RegSync;
+
+    void readRegisters();
+    void writeRegisters();
+
+    uint64_t getRbp();
+    uint64_t getDr6();
+    void setDr6(uint64_t dr6);
 
     const pid_t _tid;
 
     struct user_regs_struct _regs;
-    bool _isRegsDirty;
-    bool _isRegsModified;
+    std::future<std::pair<long, int>> _futureRegs;
+
+    uint64_t _dr6;
+    std::future<std::pair<long, int>> _futureDr6;
+
+    E_RegSync _regSync;
 
     std::recursive_mutex _stateMutex;
     std::condition_variable_any _stateCV;
 
     E_State _state;
-    int _code;
 
     bool _isSigTrapExpected;
 
     std::vector<std::pair<std::unique_ptr<WatchPoint>, bool>> _watchPoints;
     Tracer& _tracer;
-
-    SpiedProgram& _spiedProgram;
+    CallbackHandler& _callbackHandler;
 };
 
 

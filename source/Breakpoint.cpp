@@ -1,15 +1,11 @@
 #include <iostream>
-#include <sys/user.h>
-#include <sys/ptrace.h>
-#include <cstring>
-#include <unistd.h>
 #include <sys/procfs.h>
 
 #include "../include/Breakpoint.h"
 
-BreakPoint::BreakPoint(Tracer& tracer, const std::string &&name, void *addr) :
-_addr((uint64_t *)addr), _name(name), _isSet(false), _tracer(tracer),_onHit(BreakPoint::defaultOnHit){}
-
+BreakPoint::BreakPoint(Tracer &tracer, CallbackHandler &callbackHandler, const std::string &&name, void *addr) :
+_addr((uint64_t *)addr), _name(name), _isSet(false), _tracer(tracer),
+_callbackHandler(callbackHandler), _onHit(BreakPoint::defaultOnHit){}
 
 void *BreakPoint::getAddr() const{
     return _addr;
@@ -20,12 +16,9 @@ bool BreakPoint::set(){
         _backup = *_addr;
         uint64_t newWord = (_backup & (~0xFF)) | INT3;
 
-        if (_tracer.commandPTrace(false, PTRACE_POKEDATA, _tracer.getTraceePid(), _addr, newWord) == -1) {
-            std::cerr << "BreakPoint::set : PTRACE_POKEDATA failed : " << strerror(errno) << std::endl;
-        } else {
-            std::cout << "BreakPoint::set : breakpoint (" << _name << ") set" << std::endl;
-            _isSet = true;
-        }
+        _tracer.writeWord(_addr, newWord);
+        std::cout << "BreakPoint::set : breakpoint (" << _name << ") set at " << _addr << std::endl;
+        _isSet = true;
     }
     return _isSet;
 }
@@ -33,12 +26,9 @@ bool BreakPoint::set(){
 
 bool BreakPoint::unset(){
     if (_isSet) {
-        if (_tracer.commandPTrace(false, PTRACE_POKEDATA, _tracer.getTraceePid(), _addr, _backup) == -1) {
-            std::cerr << "BreakPoint::unset : PTRACE_POKEDATA failed : " << strerror(errno) << std::endl;
-        } else {
-            std::cout << "BreakPoint::unset : breakpoint (" << _name << ") unset" << std::endl;
-            _isSet = false;
-        }
+        _tracer.writeWord(_addr, _backup);
+        std::cout << "BreakPoint::unset : breakpoint (" << _name << ") unset" << std::endl;
+        _isSet = false;
     }
     return !_isSet;
 }
@@ -48,7 +38,7 @@ bool BreakPoint::resumeAndSet(SpiedThread &spiedThread)
     struct timeval start, stop;
     gettimeofday(&start, nullptr);
 
-    spiedThread.setRip(spiedThread.getRip()-1);
+    spiedThread.jump((void*)(spiedThread.getRip()-1));
     bool res = unset()
             && spiedThread.singleStep()
             && set()
@@ -63,7 +53,7 @@ bool BreakPoint::resumeAndSet(SpiedThread &spiedThread)
 }
 
 bool BreakPoint::resumeAndUnset(SpiedThread &spiedThread) {
-    spiedThread.setRip(spiedThread.getRip()-1);
+    spiedThread.jump((void*)(spiedThread.getRip()-1));
     return unset() && spiedThread.resume();
 }
 
@@ -81,7 +71,7 @@ void BreakPoint::defaultOnHit(BreakPoint& breakPoint, SpiedThread& spiedThread) 
 void BreakPoint::hit(SpiedThread &spiedThread) {
     defaultOnHit(*this, spiedThread);
     _breakPointMutex.lock();
-    _onHit(*this, spiedThread);
+    _callbackHandler.executeCallback([this, &spiedThread]{_onHit(*this, spiedThread);});
     _breakPointMutex.unlock();
 }
 

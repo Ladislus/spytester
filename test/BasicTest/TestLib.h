@@ -8,5 +8,6 @@
 extern volatile int b;
 
 int testLibFunction(int a);
+int TestLibFunction2();
 
 #endif //SPYTESTER_TESTLIB_H

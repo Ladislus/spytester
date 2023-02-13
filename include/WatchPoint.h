@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <functional>
 #include <mutex>
+#include "CallbackHandler.h"
 
 class SpiedThread;
 class Tracer;
@@ -30,7 +31,7 @@ public:
         _8BYTES = 2,
     } E_Size;
 
-    WatchPoint(Tracer &tracer, SpiedThread &spiedThread, uint32_t idx);
+    WatchPoint(Tracer &tracer, CallbackHandler &callbackHandler, SpiedThread &spiedThread, uint32_t idx);
     ~WatchPoint() = default;
 
     void* getAddr();
@@ -44,6 +45,7 @@ public:
 
 private:
     Tracer& _tracer;
+    CallbackHandler& _callbackHandler;
     SpiedThread& _spiedThread;
     bool _isSet;
     const uint32_t _idx;

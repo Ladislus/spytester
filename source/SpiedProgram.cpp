@@ -1,33 +1,20 @@
 #include "../include/SpiedProgram.h"
 
-#include <dlfcn.h>
-
-#include <cstring>
 #include <iostream>
+#include <sys/wait.h>
 
-uint32_t SpiedProgram::breakPointCounter = 0;
-
-void SpiedProgram::defaultOnAddThread(SpiedThread& spiedThread)
-{
-    std::cout << "New thread "<< spiedThread.getTid() <<" created" <<std::endl;
-}
-
-void SpiedProgram::defaultOnRemoveThread(SpiedThread& spiedThread)
-{
-    std::cout << "Thread "<< spiedThread.getTid() <<" deleted" <<std::endl;
-}
 
 SpiedProgram::~SpiedProgram(){
     _breakPoints.clear();
     _spiedThreads.clear();
 
-    delete _tracer;
-    dlclose(_handle);
+    _eventListener.join();
+
     std::cout << __FUNCTION__ << std::endl;
 }
 
 void SpiedProgram::start() {
-    _tracer->start();
+    _eventListener = std::thread(&SpiedProgram::listenEvent, this);
 }
 
 void SpiedProgram::resume() {
@@ -50,176 +37,92 @@ void SpiedProgram::terminate() {
     }
 }
 
-ProgParam *SpiedProgram::getProgParam() {
-    return &_progParam;
-}
-
-const std::string &SpiedProgram::getProgName() {
-    return _progName;
-}
-
-char *SpiedProgram::getStackTop() {
-    return (char*)_stack+stackSize;
-}
 
 // Exec Breakpoint Management
 BreakPoint *SpiedProgram::createBreakPoint(void *addr, std::string &&name) {
-    _breakPoints.emplace_back(std::make_unique<BreakPoint>(*_tracer, std::move(name), addr));
+    _breakPoints.emplace_back(std::make_unique<BreakPoint>(_tracer, _callbackHandler, std::move(name), addr));
     return _breakPoints.back().get();
 }
 
-BreakPoint* SpiedProgram::createBreakPoint(std::string &&symbName) {
-    void *addr = dlsym(_handle, symbName.c_str());
-
-    if (addr == nullptr) {
-        std::cerr << __FUNCTION__ << " : dlsym failed for "
-                  << symbName << " : " << dlerror() << std::endl;
-        return nullptr;
-    }
-
-    return createBreakPoint(addr, std::move(symbName));
+bool SpiedProgram::relink(const std::string &libName) {
+    return _dynamicLinker.relink(libName, _tracer);
 }
 
-BreakPoint *SpiedProgram::getBreakPointAt(void* addr) {
-    BreakPoint* bp = nullptr;
+void SpiedProgram::listenEvent() {
+    int wstatus;
 
-    for(auto &breakPoint : _breakPoints){
-        if(breakPoint->getAddr() == addr){
-            bp = breakPoint.get();
-        }
-    }
+    pid_t tid;
 
-    return bp;
-}
+    // Wait until all child threads exit
+    while((tid = waitpid(-1, &wstatus, WCONTINUED)) > 0) {
+        // Ignore starterThread
+        SpiedThread::E_State state = SpiedThread::UNDETERMINED;
+        int signal = 0;
+        int status = 0;
 
-// Thread Management
-SpiedThread &SpiedProgram::getSpiedThread(pid_t tid) {
-    SpiedThread *spiedThread = nullptr;
-
-    // Search thread
-    for (auto &ptr: _spiedThreads) {
-        if (tid == ptr->getTid()) {
-            spiedThread = ptr.get();
-            break;
-        }
-    }
-
-    // Register new thread
-    if(spiedThread == nullptr){
-        _spiedThreads.emplace_back(std::make_unique<SpiedThread>(*this, *_tracer, tid));
-
-        _callbackMutex.lock();
-        _onThreadStart(*_spiedThreads.back());
-        _callbackMutex.unlock();
-
-        spiedThread = _spiedThreads.back().get();
-    }
-
-    return *spiedThread;
-}
-
-void SpiedProgram::setOnThreadStart(std::function<void(SpiedThread &)>&& onThreadStart) {
-    std::lock_guard lk(_callbackMutex);
-
-    _onThreadStart = onThreadStart;
-}
-
-bool SpiedProgram::relink(std::string &&libName) {
-    void* libHandle = dlmopen(_lmid, libName.c_str(), RTLD_LAZY | RTLD_NOLOAD);
-    void* testerHandle = dlmopen(LM_ID_BASE, nullptr, RTLD_LAZY | RTLD_NOLOAD) ;
-
-    if((libHandle == nullptr) || (testerHandle == nullptr)) {
-        std::cerr << __FUNCTION__ << " : dlmopen failed : "<< dlerror() << std::endl;
-        return false;
-    }
-
-    struct link_map* testerLm;
-    if (dlinfo(testerHandle, RTLD_DI_LINKMAP, &testerLm) == -1){
-        std::cerr << "dlinfo failed : " << dlerror() << std::endl;
-        return false;
-    }
-
-    // Get the first object tester link map
-    while(testerLm->l_prev != nullptr){
-        testerLm = testerLm->l_prev;
-    }
-
-    while(testerLm != nullptr){
-        const Elf64_Addr baseAddr = testerLm->l_addr;
-
-        std::vector<uint64_t> dynEntries;
-        const Elf64_Rela* dynRela = getDynEntry(testerLm, DT_RELA, dynEntries) == 1 ?
-                                    (Elf64_Rela*)dynEntries[0] : nullptr;
-        const Elf64_Rela* pltRela = getDynEntry(testerLm, DT_JMPREL, dynEntries) == 1 ?
-                                    (Elf64_Rela*)dynEntries[0] : nullptr;
-        const Elf64_Sym * symTab  = getDynEntry(testerLm, DT_SYMTAB, dynEntries) == 1 ?
-                                    (Elf64_Sym*)dynEntries[0] : nullptr;
-        const char * strtab       = getDynEntry(testerLm, DT_STRTAB, dynEntries) == 1 ?
-                                    (char*)dynEntries[0] : nullptr;
-        const size_t dynRelaSize  = getDynEntry(testerLm, DT_RELASZ, dynEntries) == 1 ?
-                                    dynEntries[0] : 0U;
-        const size_t pltRelaSize  = getDynEntry(testerLm, DT_PLTRELSZ, dynEntries) == 1 ?
-                                    dynEntries[0] : 0U;
-
-        bool libNeeded = false;
-        getDynEntry(testerLm, DT_NEEDED, dynEntries);
-
-        if((strtab == nullptr) || (symTab == nullptr)) continue;
-
-        for(auto libStrOff : dynEntries){
-            if(strcmp(libName.c_str(), strtab+libStrOff) == 0) {
-                libNeeded = true;
-                std::cout << __FUNCTION__ << " : lib " << libName << " needed for "
-                          << testerLm->l_name << std::endl;
-                break;
-            }
+        if (tid == _pid){
+            std::cout << "loader ("<< _pid <<") : wstatus = "<< (void*)wstatus << std::endl;
+            continue;
         }
 
-        if(libNeeded)
-        {
-            auto processRela =
-            [this, baseAddr, libHandle, symTab, strtab](const Elf64_Rela* rela){
+        if (WIFSTOPPED(wstatus)) {
+            state = SpiedThread::STOPPED;
+            signal = WSTOPSIG(wstatus);
 
-                const char* symName = (char*)strtab + symTab[ELF64_R_SYM(rela->r_info)].st_name;
-                void * symAddr= getDefinition(libHandle, symName);
-
-                if( symAddr != nullptr){
-                    if ((ELF64_R_TYPE(rela->r_info) == R_X86_64_GLOB_DAT) ||
-                        (ELF64_R_TYPE(rela->r_info) == R_X86_64_JUMP_SLOT))
-                    {
-                        auto relaAddr = (uint64_t *) (rela->r_offset + baseAddr);
-                        if (_tracer->commandPTrace(true, PTRACE_POKEDATA, _tracer->getTraceePid(),
-                                                   relaAddr, symAddr) == -1)
-                        {
-                            std::cerr << "SpiedProgram::relink : PTRACE_POKEDATA failed : "
-                                      << strerror(errno) << std::endl;
-                        }
-
-                        std::cout << "SpiedProgram::relink : " << symName << " relinked" << std::endl;
-                    } else {
-                        std::cerr << "SpiedProgram::relink : unexpected relocation type ("
-                                  << ELF64_R_TYPE(rela->r_info) << ") for " << symName << std::endl;
+            if(signal == SIGTRAP && wstatus >> 16) {
+                enum __ptrace_eventcodes ptraceEvent =
+                        static_cast<enum __ptrace_eventcodes>(wstatus >> 16);
+                /*
+                if(_ptraceEvent != PTRACE_EVENT_STOP) {
+                    if(tracer.commandPTrace(true, PTRACE_GETEVENTMSG, _tid, nullptr, &_ptraceEventMsg) == -1) {
+                        std::cerr << __FUNCTION__ << " : PTRACE_GETEVENTMSG failed : " << strerror(errno) << std::endl;
                     }
-                }
-            };
-
-            if(dynRela != nullptr){
-                for(uint32_t idx = 0; idx < dynRelaSize/sizeof(Elf64_Rela); idx++){
-                    processRela(&dynRela[idx]);
-                }
+                }*/
             }
-
-            if(pltRela) {
-                for (uint32_t idx = 0; idx < pltRelaSize / sizeof(Elf64_Rela); idx++) {
-                    processRela(&pltRela[idx]);
-                }
-            }
+        } else if (WIFCONTINUED(wstatus)) {
+            state = SpiedThread::CONTINUED;
+        } else if (WIFEXITED(wstatus)) {
+            state = SpiedThread::EXITED;
+            int status = WEXITSTATUS(wstatus);
+        } else if (WIFSIGNALED(wstatus)) {
+            state = SpiedThread::TERMINATED;
+            signal = WTERMSIG(wstatus);
+        } else {
+            std::cerr << __FUNCTION__ << " : unknown wstatus : " << std::hex << wstatus << std::dec <<std::endl;
         }
 
-        testerLm = testerLm->l_next;
+        auto threadIt = std::find_if(_spiedThreads.begin(), _spiedThreads.end(),
+                                   [tid](auto& st) { return *st == tid; });
+
+        if(threadIt == _spiedThreads.end()){
+            std::cout << __FUNCTION__ << " : New thread (" << tid << ") detected \n";
+
+            auto& spiedThread = *_spiedThreads.emplace_back(
+                    std::make_unique<SpiedThread>(_tracer, _callbackHandler, tid));
+
+            if(_onThreadCreation){
+                _callbackHandler.executeCallback([&spiedThread, this]{
+                    _threadCreationMutex.lock();
+                    _onThreadCreation(spiedThread);
+                    _threadCreationMutex.unlock();
+                });
+            }
+        } else if(!(*threadIt)->handleEvent(state, signal, status)) {
+            uint64_t pc = (*threadIt)->getRip();
+            auto breakPointIt = std::find_if(_breakPoints.begin(), _breakPoints.end(),
+                                             [pc](auto& bp) { return *bp == (void*)(pc-1); });
+
+            if(breakPointIt != _breakPoints.end())
+                (*breakPointIt)->hit(**threadIt);
+        }
     }
 
-    return true;
+}
+
+void SpiedProgram::setThreadCreationCallback(const std::function<void(SpiedThread&)>& callback) {
+    _threadCreationMutex.lock();
+    _onThreadCreation = callback;
+    _threadCreationMutex.unlock();
 }
 
 

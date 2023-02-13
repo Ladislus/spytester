@@ -44,7 +44,7 @@ int main(int argc, char* argv[], char* envp[])
     std::cout << std::endl;
 
     TestFunction();
-    (void)TestFunction2();
+    (void)TestLibFunction2();
 
     pthread_t thread;
     pthread_attr_t attr;

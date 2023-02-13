@@ -13,7 +13,7 @@
 
 class BreakPoint {
 public:
-    BreakPoint(Tracer& tracer, const std::string&& name, void* addr);
+    BreakPoint(Tracer &tracer, CallbackHandler &callbackHandler, const std::string &&name, void *addr);
 
     ~BreakPoint() = default;
 
@@ -28,6 +28,10 @@ public:
     bool resumeAndUnset(SpiedThread &spiedThread);
     bool resumeAndSet(SpiedThread &spiedThread);
 
+    inline bool operator==(void* addr) const{
+        return addr == _addr;
+    }
+
 private:
     const static uint8_t INT3 = 0xCC;
 
@@ -38,6 +42,7 @@ private:
     uint64_t _backup;
     bool _isSet;
     Tracer& _tracer;
+    CallbackHandler& _callbackHandler;
 
     // callback function
     std::function<void (BreakPoint&, SpiedThread&)> _onHit;

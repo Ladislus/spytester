@@ -48,7 +48,7 @@ class WrappedFunction : public AbstractWrappedFunction{
         Wrapper& operator[](uint32_t idx){ return wrappers[idx];}
     };
 
-    static std::mutex freeWrappersMutex;
+    static      std::mutex freeWrappersMutex;
     static Wrappers wrappers;
 
     static Wrapper& getWrapper(FctPtrType wrappedFunction);
@@ -58,12 +58,13 @@ class WrappedFunction : public AbstractWrappedFunction{
     static FctPtrType getStaticWrapper(TRET(*fct)(TARGS ...));
 
     Tracer& _tracer;
+    DynamicLinker& _dynamicLinker;
     Wrapper& _wrapper;
-    void* _handle;
+    std::string _binName;
     void* _relaAddr;
 
 public:
-    WrappedFunction(Tracer& tracer, void* fptr, void *handle);
+    WrappedFunction(Tracer& tracer, DynamicLinker& dynamicLinker, std::string binName);
 
     void setWrapper(FctType&& wrapper);
     bool wrapping(bool active);
@@ -75,7 +76,7 @@ template<auto faddr>
 void WrappedFunction<faddr>::releaseWrapper(WrappedFunction::Wrapper &wrapper) {
     std::lock_guard lk(freeWrappersMutex);
 
-    wrapper.wrapperMutex.lock();
+        wrapper.wrapperMutex.lock();
     wrapper.dynamicWrapper = FctType();
     wrapper.wrapperMutex.unlock();
 
@@ -125,69 +126,42 @@ void WrappedFunction<faddr>::setWrapper(FctType&& wrapper){
 }
 
 template<auto faddr>
-WrappedFunction<faddr>::WrappedFunction(Tracer& tracer, void* fptr, void *handle):
-_tracer(tracer), _relaAddr(nullptr), _handle(handle), _wrapper(getWrapper((FctPtrType)fptr)){
-    struct link_map* lm;
-    if(dlinfo(_handle, RTLD_DI_LINKMAP, &lm) == -1){
-        std::cerr << __FUNCTION__ << " : dlinfo failed for " << handle << " : " << dlerror() << std::endl;
-        throw std::invalid_argument("Cannot get dynamic linker info");
+WrappedFunction<faddr>::WrappedFunction(Tracer& tracer, DynamicLinker& dynamicLinker, std::string binName):
+_tracer(tracer), _dynamicLinker(dynamicLinker), _relaAddr(nullptr), _binName(std::move(binName)),
+_wrapper(getWrapper((FctPtrType)dynamicLinker.convertDynSymbolAddr((void*)faddr)))
+{
+    if(_wrapper.wrappedFunction == nullptr){
+        std::cerr << __FUNCTION__ << " : failed to find function (" << (void*)faddr
+                  << ") definition in spied namespace" << std::endl;
+        std::invalid_argument("Cannot find function definition");
     }
 
-    const Elf64_Addr baseAddr = lm->l_addr;
-
-    std::vector<uint64_t> dynEntries;
-    const Elf64_Rela* dynRela = getDynEntry(lm, DT_RELA, dynEntries) == 1 ?
-                                (Elf64_Rela*)dynEntries[0] : nullptr;
-    const Elf64_Rela* pltRela = getDynEntry(lm, DT_JMPREL, dynEntries) == 1 ?
-                                (Elf64_Rela*)dynEntries[0] : nullptr;
-    const size_t dynRelaSize  = getDynEntry(lm, DT_RELASZ, dynEntries) == 1 ?
-                                dynEntries[0] : 0U;
-    const size_t pltRelaSize  = getDynEntry(lm, DT_PLTRELSZ, dynEntries) == 1 ?
-                                dynEntries[0] : 0U;
-
-    auto processRelaTable = [this, baseAddr] (const Elf64_Rela relaTable[], const size_t size){
-        if(relaTable != nullptr){
-            for(uint32_t idx = 0; idx < size/sizeof(Elf64_Rela); idx++){
-                if ((ELF64_R_TYPE(relaTable[idx].r_info) == R_X86_64_GLOB_DAT) ||
-                    (ELF64_R_TYPE(relaTable[idx].r_info) == R_X86_64_JUMP_SLOT))
-                {
-                    const auto relaAddr = (uint64_t *) (relaTable[idx].r_offset + baseAddr);
-                    if (*relaAddr == (uint64_t)_wrapper.wrappedFunction) {
-                        _relaAddr = relaAddr;
-                    }
-                }
-            }
-        }
-    };
-
-    processRelaTable(dynRela, dynRelaSize);
-    processRelaTable(pltRela, pltRelaSize);
-
+    _relaAddr = _dynamicLinker.getRelaAddr((void*)_wrapper.wrappedFunction ,_binName);
     if(_relaAddr == nullptr) {
-        std::cerr << __FUNCTION__ << " : failed to find function (" << (void*)faddr
-                  << ") in .rela.dyn and .rela.plt for " << handle << std::endl;
+        std::cerr << __FUNCTION__ << " : failed to find for " << _wrapper.wrappedFunction
+                  << " in relocation table of " << _binName << std::endl;
         std::invalid_argument("Cannot find function in relocation table");
     }
 }
 
 template<auto faddr>
 bool WrappedFunction<faddr>::wrapping(bool active){
-    bool res = true;
     void* addr = active ? (void*)_wrapper.staticWrapper : (void*)_wrapper.wrappedFunction;
 
     if(_relaAddr != nullptr){
-        if (_tracer.commandPTrace(true, PTRACE_POKEDATA, _tracer.getTraceePid(), _relaAddr, addr) == -1) {
-            std::cout << "WrappedFunction::wrap : PTRACE_POKEDATA failed : " << strerror(errno) << std::endl;
-            res = false;
+        auto futureRes = _tracer.writeWord(_relaAddr, (uint64_t)addr);
+        auto res = futureRes.get();
+        if ( res.first == -1) {
+            std::cout << "WrappedFunction::wrap : writeWord failed : " << strerror(res.second) << std::endl;
+            return false;
         }
     }
-
-    return res;
+    return true;
 }
 
 template<auto faddr>
 WrappedFunction<faddr>::~WrappedFunction(){
-    _tracer.commandPTrace(false, PTRACE_POKEDATA, _tracer.getTraceePid(), _relaAddr, (void*)_wrapper.wrappedFunction);
+    _tracer.writeWord(_relaAddr, (uint64_t)_wrapper.wrappedFunction);
     releaseWrapper(_wrapper);
 }
 
