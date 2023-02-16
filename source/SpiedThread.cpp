@@ -87,7 +87,7 @@ bool SpiedThread::terminate() {
     std::unique_lock lk(_stateMutex);
     bool success = true;
 
-    if (_state != TERMINATED) {
+    if (_state != TERMINATED && _state != EXITED) {
         if(_state == STOPPED){
             resume();
         }
@@ -101,7 +101,7 @@ bool SpiedThread::terminate() {
 
         resume(SIGTERM);
 
-        if(!_stateCV.wait_for(lk, STATE_TIMEOUT, [this] { return _state == TERMINATED;})) {
+        if(!_stateCV.wait_for(lk, STATE_TIMEOUT, [this] { return (_state == TERMINATED) || (_state == EXITED);})) {
             std::cerr << "SpiedThread::terminate TERMINATE timeout for " << _tid << std::endl;
             return false;
         }

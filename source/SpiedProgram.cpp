@@ -60,10 +60,7 @@ void SpiedProgram::listenEvent() {
         int signal = 0;
         int status = 0;
 
-        if (tid == _pid){
-            std::cout << "loader ("<< _pid <<") : wstatus = "<< (void*)wstatus << std::endl;
-            continue;
-        }
+        if (tid == _pid) continue;
 
         if (WIFSTOPPED(wstatus)) {
             state = SpiedThread::STOPPED;

@@ -10,27 +10,30 @@ int main(int argc, char* argv[], char* envp[])
     }
 
     try{
-        std::cerr << "INIT" << std::endl;
-
         SpiedProgram sp(argv[1]);
 
-        sp.setOnThreadStart([](SpiedThread& sp){
+        sp.setThreadCreationCallback([](SpiedThread& sp){
             sp.resume();
         });
 
+        std::cerr << "START" << std::endl;
+        sp.start();
+
+        sleep(1);
+
         sp.relink("libThreadIdLib.so");
 
-        BreakPoint* bp1 = sp.createBreakPoint((void*)&main1);
-        BreakPoint* bp3 = sp.createBreakPoint((void*)&main3);
-        BreakPoint* bp4 = sp.createBreakPoint((void*)&main4);
+        BreakPoint* bp1 = sp.createBreakPoint((void*)&main1, "BreakPoint1");
+        BreakPoint* bp3 = sp.createBreakPoint((void*)&main3, "BreakPoint3");
+        BreakPoint* bp4 = sp.createBreakPoint((void*)&main4, "BreakPoint4");
 
         bp1->set();
         bp3->set();
         bp4->set();
 
-        SpiedThread* sp1 = nullptr;
-        SpiedThread* sp3 = nullptr;
-        SpiedThread* sp4 = nullptr;
+        SpiedThread* st1 = nullptr;
+        SpiedThread* st3 = nullptr;
+        SpiedThread* st4 = nullptr;
 
         auto idThread = []( SpiedThread*& psp){
             return [&psp]( BreakPoint& bp, SpiedThread& sp) {
@@ -40,13 +43,16 @@ int main(int argc, char* argv[], char* envp[])
             };
         };
 
-        bp1->setOnHitCallback(idThread(sp1));
-        bp3->setOnHitCallback(idThread(sp3));
-        bp4->setOnHitCallback(idThread(sp4));
+        bp1->setOnHitCallback(idThread(st1));
+        bp3->setOnHitCallback(idThread(st3));
+        bp4->setOnHitCallback(idThread(st4));
 
-        std::cerr << "START" << std::endl;
-        sp.start();
-        sleep(3);
+        sp.resume();
+        sleep(1);
+        st1->resume();
+        sleep(1);
+        st1->resume();
+        sleep(5);
 
         std::cerr << "STOP" << std::endl;
         sp.stop();

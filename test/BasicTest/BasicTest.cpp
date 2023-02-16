@@ -74,48 +74,6 @@ int main(int argc, char* argv[], char* envp[])
         sleep(5);
 
         prog.terminate();
-        /*
-        sleep(1);
-
-        mainThread->resume();
-
-        sleep(5);
-
-        prog.terminate();
-
-        sleep(10);
-        /*
-        auto f = prog.wrapFunction<testLibFunction>("TestProgram");
-        f->setWrapper([](int a){
-            std::cout<< "HELLO!" <<std::endl;
-            testLibFunction(a);
-            return a+2;
-        });
-        f->wrapping(true);
-
-        prog.resume();
-
-        sleep(3);
-
-        prog.stop();
-
-        if(lastCreatedThread != nullptr)
-        {
-            WatchPoint* wp = lastCreatedThread->createWatchPoint();
-            wp->setOnHit([](WatchPoint& wp, SpiedThread& sp){
-                            sp.resume();
-                         });
-            wp->set((void*)&b, WatchPoint::READ_WRITE, WatchPoint::_4BYTES);
-        }
-
-        f->wrapping(false);
-
-        prog.resume();
-
-        sleep(10);
-
-        prog.terminate();
-         */
     }
     catch(const std::invalid_argument& e){
         std::cerr << "SpiedProgram failed : " << e.what() << std::endl;

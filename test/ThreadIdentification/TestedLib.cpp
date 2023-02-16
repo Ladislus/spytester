@@ -30,11 +30,11 @@ void* main1(void* param)
     sem_init(&sem, 0, 0);
 
     pthread_create(&thread1, &attr, main3, nullptr);
-    //std::cout << "CONSUMER : Producer 1 created" << std::endl;
+    std::cout << "CONSUMER : Producer 1 created" << std::endl;
     pthread_create(&thread2, &attr, main4, nullptr);
-    //std::cout << "CONSUMER : Producer 2 created" << std::endl;
+    std::cout << "CONSUMER : Producer 2 created" << std::endl;
 
-    //std::cout << "CONSUMER : start consume" << std::endl;
+    std::cout << "CONSUMER : start consume" << std::endl;
     while(!stop1)
     {
         sem_wait(&sem);
@@ -66,12 +66,12 @@ void* main3(void* param)
 {
     int msgId = 0;
 
-//    std::cout << "PRODUCER1 : start porduce" << std::endl;
+    std::cout << "PRODUCER1 : start porduce" << std::endl;
 
     while(!stop2)
     {
         mutex.lock();
-        queue.push(std::make_pair(3, ++msgId));
+        queue.emplace(3, ++msgId);
         mutex.unlock();
         sem_post(&sem);
         usleep(300000);
@@ -83,12 +83,12 @@ void* main4(void* param)
 {
     int msgId = 0;
 
-    // std::cout << "PRODUCER2 : start produce" << std::endl;
+    std::cout << "PRODUCER2 : start produce" << std::endl;
 
     while(!stop2)
     {
         mutex.lock();
-        queue.push(std::make_pair(4, ++msgId));
+        queue.emplace(4, ++msgId);
         mutex.unlock();
         sem_post(&sem);
         usleep(450000);
