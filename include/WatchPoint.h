@@ -1,7 +1,3 @@
-//
-// Created by baptiste on 04/10/22.
-//
-
 #ifndef SPYTESTER_WATCHPOINT_H
 #define SPYTESTER_WATCHPOINT_H
 

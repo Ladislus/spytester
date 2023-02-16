@@ -1,7 +1,3 @@
-//
-// Created by baptiste on 14/09/22.
-//
-
 #ifndef SPYTESTER_BREAKPOINT_H
 #define SPYTESTER_BREAKPOINT_H
 
