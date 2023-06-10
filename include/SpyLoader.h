@@ -5,7 +5,7 @@
 #include <thread>
 #include <mutex>
 #include <vector>
-#include "SpiedNamespace.h"
+#include "DynamicNamespace.h"
 
 class SpyLoader;
 
@@ -24,20 +24,21 @@ public :
     void ctypeInit() noexcept;
     void initStaticTLS(struct link_map* lm) noexcept;
 
-    SpiedNamespace& reserveNamespace();
-    SpiedNamespace& releaseNamespace();
-
     SpyLoader(const SpyLoader&) = delete;
     SpyLoader& operator=(const SpyLoader&) = delete;
     SpyLoader(SpyLoader&&) = delete;
     SpyLoader& operator=(SpyLoader&&) = delete;
 
+    Lmid_t reserveNamespaceId(DynamicNamespace&);
+    void releaseNamespaceId(Lmid_t id);
+
+    DynamicNamespace* getCurrentNamespace();
 private:
     SpyLoader();
     ~SpyLoader() = default;
 
-    void createNamespaces();
-    void updateWrappedFunctions(SpiedNamespace& spiedNamespace);
+    void createSpiedNamespaces(uint32_t nb);
+    void updateWrappedFunctions(DynamicNamespace& spiedNamespace);
 
     using pthread_key_delete_fptr   = int (*)(pthread_key_t);
     using pthread_key_create_fptr   = int (*)(pthread_key_t *, void(*)(void *));
@@ -51,8 +52,9 @@ private:
     std::vector<ctype_init_fptr> _ctype_init_functions;
     std::vector<init_static_tls_fptr> _init_static_tls_functions;
 
-    SpiedNamespace _baseNamespace;
-    std::vector<SpiedNamespace> _spiedNamespaces;
+    DynamicNamespace _baseNamespace;
+    std::set<Lmid_t> _avlNamespaceId;
+    std::map<Lmid_t, DynamicNamespace&> _usedNamespace;
 
     init_static_tls_fptr* _dlInitStaticTLS;
     list_t* _baseStackUserList;

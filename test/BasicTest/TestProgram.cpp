@@ -4,6 +4,8 @@
 #include <unistd.h>
 #include "TestLib.h"
 
+#include <sys/sysinfo.h>
+
 void TestFunction()
 {
     std::cout << __FUNCTION__ <<" called! and b = "<< b << std::endl;
@@ -19,12 +21,10 @@ extern "C"
 
 void* TestPthreadFunction(void* arg)
 {
-
-    if( arg!= nullptr )
-    {
-        return nullptr;
-    }
     int tmp = 0;
+
+    //std::cout << *((int*)arg) << std::endl;
+
     while(1)
     {
         tmp = testLibFunction(tmp);
@@ -38,6 +38,7 @@ int main(int argc, char* argv[], char* envp[])
 {
     std::cout << argv[0] << " ("<< getpid() <<") : started!" << std::endl;
     std::cout << "parameters("<<argc<<") = ";
+
     for(int i = 0; i < argc; i++ ){
         std::cout << argv[i] << " ; ";
     }
@@ -53,9 +54,12 @@ int main(int argc, char* argv[], char* envp[])
 
     (void)testLibFunction(100);
 
-    std::cout << argv[0] <<" waits for child to exit!" << std::endl;
-    pthread_join(thread, nullptr);
+    pthread_detach(thread);
 
+    std::cout << argv[0] <<" waits for child to exit!" << std::endl;
+    //pthread_join(thread, nullptr);
+
+    sleep(30);
     std::cout << "child exits" << std::endl;
 
     pthread_attr_destroy(&attr);

@@ -10,7 +10,6 @@
 #include <cstring>
 
 #include "Tracer.h"
-#include "DynamicLinker.h"
 #include "Meta.h"
 
 #ifndef WRAPPER_MAX_NB
@@ -23,9 +22,19 @@ struct AbstractWrappedFunction{
 
 template<auto faddr>
 class WrappedFunction : public AbstractWrappedFunction{
+
     using FctPtrType = decltype(faddr);
     using FctType = decltype(std::function(std::declval<FctPtrType>()));
 
+public:
+    WrappedFunction(Tracer& tracer, DynamicNamespace& dynamicNamespace, std::string binName);
+
+    void setWrapper(FctType&& wrapper);
+    bool wrapping(bool active);
+
+    ~WrappedFunction() override;
+
+private:
     struct Wrapper {
         FctPtrType staticWrapper;
         FctPtrType wrappedFunction;
@@ -58,18 +67,11 @@ class WrappedFunction : public AbstractWrappedFunction{
     static FctPtrType getStaticWrapper(TRET(*fct)(TARGS ...));
 
     Tracer& _tracer;
-    DynamicLinker& _dynamicLinker;
+    DynamicNamespace& _spiedNamespace;
     Wrapper& _wrapper;
     std::string _binName;
     void* _relaAddr;
 
-public:
-    WrappedFunction(Tracer& tracer, DynamicLinker& dynamicLinker, std::string binName);
-
-    void setWrapper(FctType&& wrapper);
-    bool wrapping(bool active);
-
-    ~WrappedFunction() override;
 };
 
 template<auto faddr>
@@ -126,9 +128,9 @@ void WrappedFunction<faddr>::setWrapper(FctType&& wrapper){
 }
 
 template<auto faddr>
-WrappedFunction<faddr>::WrappedFunction(Tracer& tracer, DynamicLinker& dynamicLinker, std::string binName):
-_tracer(tracer), _dynamicLinker(dynamicLinker), _relaAddr(nullptr), _binName(std::move(binName)),
-_wrapper(getWrapper((FctPtrType)dynamicLinker.convertDynSymbolAddr((void*)faddr)))
+WrappedFunction<faddr>::WrappedFunction(Tracer& tracer, DynamicNamespace& dynamicNamespace, std::string binName):
+_tracer(tracer), _spiedNamespace(dynamicNamespace), _relaAddr(nullptr), _binName(std::move(binName)),
+_wrapper(getWrapper((FctPtrType)_spiedNamespace.convertDynSymbolAddr((void*)faddr)))
 {
     if(_wrapper.wrappedFunction == nullptr){
         std::cerr << __FUNCTION__ << " : failed to find function (" << (void*)faddr
@@ -136,7 +138,25 @@ _wrapper(getWrapper((FctPtrType)dynamicLinker.convertDynSymbolAddr((void*)faddr)
         std::invalid_argument("Cannot find function definition");
     }
 
-    _relaAddr = _dynamicLinker.getRelaAddr((void*)_wrapper.wrappedFunction ,_binName);
+    DynamicModule* dynamicModule = _spiedNamespace.load(_binName);
+    if(dynamicModule != nullptr) {
+        std::cerr << __FUNCTION__ << " : " << _binName << " cannot be found or loaded in the spied namespace"
+                  << std::endl;
+    }
+
+    std::string mangledFunctionName = DynamicModule::getMangledName(faddr);
+
+    auto findRela = [this, &mangledFunctionName](uint32_t type, const std::string& name, uint64_t* addr){
+        if((type == R_X86_64_GLOB_DAT || type == R_X86_64_JUMP_SLOT) && (name == mangledFunctionName))
+        {
+            _relaAddr = addr;
+            return true;
+        }
+        return false;
+    };
+
+    dynamicModule->iterateOverRelocations(findRela);
+
     if(_relaAddr == nullptr) {
         std::cerr << __FUNCTION__ << " : failed to find for " << _wrapper.wrappedFunction
                   << " in relocation table of " << _binName << std::endl;

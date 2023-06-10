@@ -8,6 +8,8 @@
 #include "WrappedFunction.h"
 #include "WatchPoint.h"
 #include "CallbackHandler.h"
+#include "DynamicNamespace.h"
+#include "SpyLoader.h"
 
 #include <sys/mman.h>
 #include <unistd.h>
@@ -27,7 +29,7 @@ private:
     pid_t _pid;
 
     CallbackHandler _callbackHandler;
-    DynamicLinker _dynamicLinker;
+    DynamicNamespace _spiedNamespace;
     Tracer _tracer;
 
     std::thread _eventListener;
@@ -77,10 +79,10 @@ _argv(std::accumulate( _argvStr.begin(), _argvStr.end(), std::vector<const char*
                             v.push_back(s.c_str());
                             return v;
                        })),
-_tracer(),
-_dynamicLinker(static_cast<int>(_argvStr.size()), _argv.data(), environ)
+_spiedNamespace((int)_argvStr.size(), _argv.data(), environ),
+_tracer()
 {
-    _pid = _tracer.startTracing(_dynamicLinker);
+    _pid = _tracer.startTracing(_spiedNamespace);
 }
 
 template<auto faddr>
@@ -91,7 +93,7 @@ WrappedFunction<faddr>* SpiedProgram::wrapFunction(const std::string &binName) {
     auto it = _wrappedFunctions.find(key);
 
     if( it == _wrappedFunctions.end() ){
-        auto uniquePtr = std::make_unique<WrappedFunction<faddr>>(_tracer, _dynamicLinker, binName);
+        auto uniquePtr = std::make_unique<WrappedFunction<faddr>>(_tracer, _spiedNamespace, binName);
         wrappedFunction = uniquePtr.get();
         _wrappedFunctions[std::move(key)] = std::move(uniquePtr);
     } else {

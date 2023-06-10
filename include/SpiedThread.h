@@ -33,7 +33,7 @@ public:
 
     void setState(E_State state);
 
-    bool handleEvent(E_State state, int signal, int status);
+    bool handleEvent(E_State state, int signal, int status, uint16_t ptraceEvent);
 
     void jump(void* addr);
 

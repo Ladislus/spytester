@@ -45,7 +45,37 @@ BreakPoint *SpiedProgram::createBreakPoint(void *addr, std::string &&name) {
 }
 
 bool SpiedProgram::relink(const std::string &libName) {
-    return _dynamicLinker.relink(libName, _tracer);
+    DynamicModule* spiedModule;
+    DynamicNamespace* curNamespace = getSpyLoader().getCurrentNamespace();
+
+    if(curNamespace == nullptr){
+        std::cerr<< __FUNCTION__ << " cannot find the current namespace" << std::endl;
+        return false;
+    }
+
+    spiedModule = _spiedNamespace.load(libName);
+    if(spiedModule == nullptr){
+        std::cerr << __FUNCTION__ <<" cannot load " << libName << std::endl;
+        return false;
+    }
+
+    bool isRelinked = curNamespace->iterateOverModule([spiedModule](DynamicModule& dynModule){
+        try {
+            dynModule.relink(*spiedModule);
+        }
+        catch(std::invalid_argument& e) {
+            std::cerr << "failed to relink " << dynModule.getName() << " -> " << spiedModule->getName() << " : "
+                      << e.what() << std::endl;
+            return false;
+        }
+        return true;
+    });
+
+    if(!isRelinked){
+        std::cerr << __FUNCTION__ << " : the relinking failed and may be partially achieved" << std::endl;
+    }
+
+    return isRelinked;
 }
 
 void SpiedProgram::listenEvent() {
@@ -59,6 +89,7 @@ void SpiedProgram::listenEvent() {
         SpiedThread::E_State state = SpiedThread::UNDETERMINED;
         int signal = 0;
         int status = 0;
+        uint16_t ptraceEvent = 0;
 
         if (tid == _pid) continue;
 
@@ -66,9 +97,8 @@ void SpiedProgram::listenEvent() {
             state = SpiedThread::STOPPED;
             signal = WSTOPSIG(wstatus);
 
-            if(signal == SIGTRAP && wstatus >> 16) {
-                enum __ptrace_eventcodes ptraceEvent =
-                        static_cast<enum __ptrace_eventcodes>(wstatus >> 16);
+            if(signal == SIGTRAP) {
+                ptraceEvent = (wstatus >> 16);
                 /*
                 if(_ptraceEvent != PTRACE_EVENT_STOP) {
                     if(tracer.commandPTrace(true, PTRACE_GETEVENTMSG, _tid, nullptr, &_ptraceEventMsg) == -1) {
@@ -104,7 +134,7 @@ void SpiedProgram::listenEvent() {
                     _threadCreationMutex.unlock();
                 });
             }
-        } else if(!(*threadIt)->handleEvent(state, signal, status)) {
+        } else if(!(*threadIt)->handleEvent(state, signal, status, ptraceEvent)) {
             uint64_t pc = (*threadIt)->getRip();
             auto breakPointIt = std::find_if(_breakPoints.begin(), _breakPoints.end(),
                                              [pc](auto& bp) { return *bp == (void*)(pc-1); });

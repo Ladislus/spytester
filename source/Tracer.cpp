@@ -5,7 +5,6 @@
 #include <unistd.h>
 #include "../include/Tracer.h"
 #include "../include/SpiedProgram.h"
-#include "../include/DynamicLinker.h"
 
 #include <sys/syscall.h>
 #define gettid() syscall(SYS_gettid)
@@ -29,19 +28,19 @@ Tracer::Tracer()
     }
 }
 
-pid_t Tracer::startTracing(DynamicLinker& dynamicLinker) {
+pid_t Tracer::startTracing(DynamicNamespace& spiedNamespace) {
     std::promise<pid_t> promise;
     auto future = promise.get_future();
 
-    _tracer = std::thread(&Tracer::trace, this, std::ref(dynamicLinker), std::move(promise));
+    _tracer = std::thread(&Tracer::trace, this, std::ref(spiedNamespace), std::move(promise));
     return future.get();
 }
 
-void Tracer::createTracee(DynamicLinker& dynamicLinker){
+void Tracer::createTracee(DynamicNamespace &spiedNamespace){
 
     int cloneFlags = CLONE_FS | CLONE_FILES | SIGCHLD | CLONE_VM;
     void* stackTop = (void*)((uint64_t)_stack + stackSize);
-    _traceePid = clone(preStarter, stackTop, cloneFlags, &dynamicLinker);
+    _traceePid = clone(preStart, stackTop, cloneFlags, &spiedNamespace);
 
     if(_traceePid == -1){
         std::cerr << __FUNCTION__ <<" : clone failed : "<< strerror(errno) <<std::endl;
@@ -62,7 +61,7 @@ void Tracer::createTracee(DynamicLinker& dynamicLinker){
         }
     }
 
-    // Wait for pre starter to create starter thread
+    // Wait for pre start to create the main thread
     if(waitpid(_traceePid, &wstatus, 0) == -1){
         std::cerr << __FUNCTION__ << " : waitpid failed (create starter): " << strerror(errno) << std::endl;
     }
@@ -71,9 +70,9 @@ void Tracer::createTracee(DynamicLinker& dynamicLinker){
     }
 }
 
-void Tracer::trace(DynamicLinker& dynamicLinker, std::promise<pid_t> promise){
+void Tracer::trace(DynamicNamespace &spiedNamespace, std::promise<pid_t> promise){
 
-    createTracee(dynamicLinker);
+    createTracee(spiedNamespace);
     promise.set_value(_traceePid);
 
     setState(STARTING);
@@ -99,7 +98,7 @@ void Tracer::trace(DynamicLinker& dynamicLinker, std::promise<pid_t> promise){
 }
 
 
-int Tracer::preStarter(void * dynamicLinker) {
+int Tracer::preStart(void * spiedNamespace) {
     if(ptrace(PTRACE_TRACEME, 0, NULL, NULL) == -1) {
         std::cerr<< __FUNCTION__ << " : PTRACE_TRACEME failed : " << strerror(errno) << std::endl;
         std::exit(1);
@@ -109,7 +108,7 @@ int Tracer::preStarter(void * dynamicLinker) {
         std::cerr<<__FUNCTION__<<" : ptrace failed : " << strerror(errno) << std::endl;
         std::exit(1);
     }
-    reinterpret_cast<DynamicLinker *>(dynamicLinker)->preload();
+    DynamicNamespace::createMainThread(reinterpret_cast<DynamicNamespace *>(spiedNamespace));
     return 0;
 }
 
@@ -137,11 +136,14 @@ void Tracer::setState(Tracer::E_State state) {
 
 Tracer::~Tracer() {
 
+    munmap(_stack, stackSize);
+
     setState(STOPPED);
     sem_post(&_cmdsSem);
 
     _tracer.join();
     sem_destroy(&_cmdsSem);
+
 
     std::cout<< __FUNCTION__ << std::endl;
 }

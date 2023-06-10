@@ -17,6 +17,7 @@
 #include <list>
 
 #include "SpiedThread.h"
+#include "DynamicNamespace.h"
 
 class SpiedProgram;
 class DynamicLinker;
@@ -29,7 +30,7 @@ public :
     Tracer(Tracer&&) = delete;
     ~Tracer();
 
-    pid_t startTracing(DynamicLinker& dynamicLinker);
+    pid_t startTracing(DynamicNamespace& spiedNamespace);
 
     template<typename ... Args>
     std::future<std::pair<long, int>>
@@ -48,7 +49,7 @@ private:
         STOPPED,
     } E_State;
 
-    static int preStarter(void* param);
+    static int preStart(void* param);
 
     void* _stack;
 
@@ -66,8 +67,8 @@ private:
     std::queue<std::function<void()>, std::list<std::function<void()>>> _commands;
 
     void setState(E_State state);
-    void trace(DynamicLinker& dynamicLinker, std::promise<pid_t> promise);
-    void createTracee(DynamicLinker& dynamicLinker);
+    void trace(DynamicNamespace &spiedNamespace, std::promise<pid_t> promise);
+    void createTracee(DynamicNamespace &spiedNamespace);
 };
 
 template<typename ... Args>

@@ -1,8 +1,11 @@
 #include <iostream>
 #include <cstring>
+#include <algorithm>
+#include <list>
 #include "../include/SpyLoader.h"
 
-#define NAMESPACE_NB 10
+// Can be overload using SPIED_NAMESPACES_NB environnement variable
+#define SPIED_NAMESPACES_NB 3
 
 struct list_head
 {
@@ -54,8 +57,16 @@ SpyLoader::SpyLoaderInitializer::SpyLoaderInitializer() {;
     dlinfo(handle,  RTLD_DI_LMID, &lmid);
 
     if(lmid == LM_ID_BASE){
+        int namespaceNb = SPIED_NAMESPACES_NB;
+        const char* env = getenv("SPIED_NAMESPACES_NB");
+
+        if(env != nullptr){
+            int n = atoi(env);
+            if(n > 0 && n < 11) namespaceNb = n;
+        }
+
         SpyLoader::spyLoader = new SpyLoader();
-        SpyLoader::spyLoader->createNamespaces();
+        SpyLoader::spyLoader->createSpiedNamespaces(namespaceNb);
     } else {
         handle = dlmopen(LM_ID_BASE, "libSpyLoader.so", RTLD_LAZY | RTLD_NOLOAD);
         if(handle == nullptr){
@@ -75,10 +86,10 @@ SpyLoader &getSpyLoader() {
 
 SpyLoader* SpyLoader::spyLoader;
 
-SpyLoader::SpyLoader() : _baseNamespace(true) {
+SpyLoader::SpyLoader() : _baseNamespace() {
 
     // load libpthread in the current namespace
-    ElfBin* libpthread = _baseNamespace.open("libpthread.so.0");
+    DynamicModule* libpthread = _baseNamespace.load("libpthread.so.0");
     if(libpthread == nullptr){
         std::cerr << __FUNCTION__ <<" : failed to load libpthread.so.0 in base namespace" << std::endl;
         std::abort();
@@ -110,32 +121,38 @@ SpyLoader::SpyLoader() : _baseNamespace(true) {
 
 }
 
-void SpyLoader::createNamespaces() {
+void SpyLoader::createSpiedNamespaces(uint32_t nb) {
 
-    if(!_spiedNamespaces.empty()){
+    if(!_avlNamespaceId.empty() || !_usedNamespace.empty() ){
         std::cerr << __FUNCTION__ <<" should only be called once" <<std::endl;
         return;
     }
 
-    std::cout << __FUNCTION__ << " start creating " << NAMESPACE_NB-1 << " additional namespace" << std::endl;
+    std::list<DynamicNamespace> namespaces;
 
-    for(uint32_t id = 1; id < NAMESPACE_NB; id++){
-        auto& spiedNamespace = _spiedNamespaces.emplace_back(false);
+    for(uint32_t i = 0; i < nb; i++){
+        void* handle = dlmopen(LM_ID_NEWLM, "libSpyLoader.so", RTLD_LAZY);
 
-        if(spiedNamespace.open("libSpyLoader.so") == nullptr){
-            std::cerr << __FUNCTION__ << " : failed to load libSpyLoader.so in a new namespace" << std::endl;
-            std::abort();
+        if(handle == nullptr){
+            std::cerr << __FUNCTION__ <<" : failed to load libSpyLoader.so : "<< dlerror() << std::endl;
+            continue;
         }
 
-        updateWrappedFunctions(spiedNamespace);
-    }
+        Lmid_t id;
+        if(dlinfo(handle, RTLD_DI_LMID, &id) != 0){
+            std::cerr << __FUNCTION__ <<" : dlinfo failed : " << dlerror() << std::endl;
+            continue;
+        }
+        _avlNamespaceId.insert(id);
+        updateWrappedFunctions(namespaces.emplace_back(0, nullptr, nullptr));
 
-    *_dlInitStaticTLS = &dl_init_static_tls;
+        // No need to try to close libSpyLoader.so which is tagged NODELETE so whatever happen it should stay in loaded
+    }
 }
 
-void SpyLoader::updateWrappedFunctions(SpiedNamespace &spiedNamespace) {
+void SpyLoader::updateWrappedFunctions(DynamicNamespace &spiedNamespace) {
     // libpthread
-    ElfBin* libpthread = spiedNamespace.open("libpthread.so.0");
+    DynamicModule* libpthread = spiedNamespace.load("libpthread.so.0");
     if(libpthread == nullptr){
         std::cerr << __FUNCTION__ <<" : failed to load libpthread.so.0" << std::endl;
         std::abort();
@@ -186,7 +203,7 @@ void SpyLoader::updateWrappedFunctions(SpiedNamespace &spiedNamespace) {
     _baseStackUserList->prev = _defaultThreadStack;
 
     // libc
-    ElfBin* libc = spiedNamespace.open("libc.so.6");
+    DynamicModule* libc = spiedNamespace.load("libc.so.6");
     if(libc == nullptr){
         std::cerr << __FUNCTION__ <<" : failed to load libc.so.6" << std::endl;
         std::abort();
@@ -254,3 +271,55 @@ void SpyLoader::initStaticTLS(struct link_map *lm) noexcept {
         f(lm);
     }
 }
+
+Lmid_t SpyLoader::reserveNamespaceId(DynamicNamespace& dynamicNamespace) {
+    // FIXME there is no guarantee -2 cannot be used as dynamic namespace id
+    Lmid_t id = -2;
+
+    if(!_avlNamespaceId.empty()){
+        auto node = _avlNamespaceId.extract(_avlNamespaceId.begin());
+        id = node.value();
+        _usedNamespace.emplace(id, dynamicNamespace);
+    }
+
+    return id;
+}
+
+void SpyLoader::releaseNamespaceId(Lmid_t id) {
+    auto node = _usedNamespace.extract(id);
+
+    if(!node.empty()){
+        _avlNamespaceId.insert(node.key());
+    } else {
+        std::cerr << __FUNCTION__ << " : try to release unused namespace "<< id << std::endl;
+    }
+}
+
+DynamicNamespace *SpyLoader::getCurrentNamespace(){
+    void* retAddr = __builtin_return_address(0);
+
+    Dl_info info;
+    struct link_map* lm;
+
+    if(dladdr1(retAddr, &info, (void**)(&lm), RTLD_DL_LINKMAP) == 0){
+        std::cerr << __FUNCTION__ << " : dladdr1 failed for "<< (void*) retAddr <<" : " << dlerror() << std::endl;
+        return nullptr;
+    }
+
+    if(_baseNamespace.isContaining(lm)){
+        return &_baseNamespace;
+    }
+
+    auto it = std::find_if(_usedNamespace.cbegin(), _usedNamespace.cend(),[lm](const auto& pair){
+        return pair.second.isContaining(lm);
+    });
+
+    if(it == _usedNamespace.cend()) {
+        std::cerr << __FUNCTION__ << " is called from a namespace that is not supposed to be used" << dlerror()
+                  << std::endl;
+        return nullptr;
+    }
+
+    return &(it->second);
+}
+

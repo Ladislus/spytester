@@ -173,9 +173,13 @@ bool SpiedThread::backtrace() {
 }
 
 bool SpiedThread::detach() {
-    bool res = true;
-    _tracer.commandPTrace(PTRACE_DETACH, _tid, 0, 0);
-    return res;
+    auto futureRes = _tracer.commandPTrace(PTRACE_DETACH, (_tid-2), 0, SIGSTOP);
+    auto res = futureRes.get();
+    if(res.first != 0){
+        std::cerr << __FUNCTION__ << " PTRACE_DETACH failed : " << strerror(res.second) << std::endl;
+    }
+
+    return (res.first == 0);
 }
 
 uint64_t SpiedThread::getRip() {
@@ -260,7 +264,7 @@ void SpiedThread::readRegisters() {
     }
 }
 
-bool SpiedThread::handleEvent(SpiedThread::E_State state, int signal, int status) {
+bool SpiedThread::handleEvent(SpiedThread::E_State state, int signal, int status, uint16_t ptraceEvent) {
     bool isEventHandled = false;
     readRegisters();
 
@@ -291,6 +295,11 @@ bool SpiedThread::handleEvent(SpiedThread::E_State state, int signal, int status
                     isEventHandled = true;
                 }
 
+                if(ptraceEvent == PTRACE_EVENT_CLONE){
+                    resume();
+                    isEventHandled = true;
+                }
+
                 uint64_t dr6 = getDr6();
                 for (uint32_t idx = 0; idx < WatchPoint::maxNb; idx++) {
                     if (dr6 & (1 << idx)) {
@@ -304,6 +313,12 @@ bool SpiedThread::handleEvent(SpiedThread::E_State state, int signal, int status
             } else if(signal == SIGSEGV) {
                 std::cout << "SIGSEGV received" << std::endl;
                 backtrace();
+               /* resume(SIGSTOP);
+                detach();
+                std::string gdbCommand = "gdb attach "+std::to_string(_tid-2);
+                if(system(gdbCommand.c_str()) != 0){
+                    std::cerr <<"Gdb attach failed" << std::endl;
+                }*/
             } else if(signal == SIGSTOP){
                 std::cout << "SIGSTOP received" << std::endl;
             } else {
