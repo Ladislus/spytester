@@ -8,7 +8,7 @@ SpiedProgram::~SpiedProgram(){
     _breakPoints.clear();
     _spiedThreads.clear();
 
-    _eventListener.join();
+   _eventListener.join();
 
     std::cout << __FUNCTION__ << std::endl;
 }
@@ -47,6 +47,7 @@ BreakPoint *SpiedProgram::createBreakPoint(void *addr, std::string &&name) {
 bool SpiedProgram::relink(const std::string &libName) {
     DynamicModule* spiedModule;
     DynamicNamespace* curNamespace = getSpyLoader().getCurrentNamespace();
+
 
     if(curNamespace == nullptr){
         std::cerr<< __FUNCTION__ << " cannot find the current namespace" << std::endl;

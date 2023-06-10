@@ -17,13 +17,13 @@ set_target_properties(SpyLoader PROPERTIES BUILD_RPATH .)
 
 add_library(SpyTester SHARED source/SpiedProgram.cpp include/SpiedProgram.h source/SpiedThread.cpp include/SpiedThread.h source/Tracer.cpp include/Tracer.h source/Breakpoint.cpp include/Breakpoint.h include/WrappedFunction.h  source/WatchPoint.cpp include/WatchPoint.h include/Meta.h source/CallbackHandler.cpp include/CallbackHandler.h)
 target_compile_options(SpyTester PRIVATE -O2 -g)
-target_link_libraries(SpyTester dl pthread)
+target_link_libraries(SpyTester dl pthread SpyLoader)
 set_target_properties(SpyTester PROPERTIES BUILD_RPATH_USE_ORIGIN TRUE)
 set_target_properties(SpyTester PROPERTIES BUILD_RPATH .)
 add_dependencies(SpyTester SpyLoader)
 
 # Tester executables
-add_executable(BasicTest test/BasicTest/BasicTest.cpp include/SpiedProgram.h test/WrapperTest/WrapperTest.cpp test/WrapperTest/WrapperTestedLib.cpp test/TLSTest/TLSTest.cpp source/DynamicNamespace.cpp include/DynamicNamespace.h source/Relinkage.cpp include/Relinkage.h)
+add_executable(BasicTest test/BasicTest/BasicTest.cpp include/SpiedProgram.h test/WrapperTest/WrapperTest.cpp test/WrapperTest/WrapperTestedLib.cpp)
 target_compile_options(BasicTest PRIVATE -fPIC -g )
 target_link_libraries(BasicTest SpyTester TestLib)
 

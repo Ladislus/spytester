@@ -23,6 +23,7 @@ public:
     const std::vector<char>& getStrTab();
     const std::vector<char>& getDynStrTab();
     const std::vector<Elf64_Rela>& getRela();
+    const std::vector<Elf64_Shdr>& getShdr();
 
     static ElfFile& getElfFile(const std::string& filePath);
 

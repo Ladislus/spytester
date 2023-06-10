@@ -15,6 +15,7 @@ extern "C"
 {
     int TestFunction2()
     {
+        std::cout << __FUNCTION__ << " = "<< (void*)TestFunction2 << std::endl;
         return 17;
     }
 }
@@ -44,7 +45,7 @@ int main(int argc, char* argv[], char* envp[])
     }
     std::cout << std::endl;
 
-    TestFunction();
+    TestFunction2();
     (void)TestLibFunction2();
 
     pthread_t thread;

@@ -33,10 +33,12 @@ int main(int argc, char* argv[], char* envp[])
 
         prog.start();
 
+        std::cout << "Program started" << std::endl;
         sleep(1);
 
         prog.relink("libTestLib.so");
-        std::cout << "testLibFunction = " << (void*)&TestLibFunction2 << std::endl;
+
+        std::cout << "TestLibFunction2 = " << (void*)&TestLibFunction2 << std::endl;
 
         BreakPoint* bp = prog.createBreakPoint((void*)&TestLibFunction2, "TestFunction2");
         if(bp != nullptr)

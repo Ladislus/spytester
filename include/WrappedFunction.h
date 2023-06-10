@@ -139,20 +139,21 @@ _wrapper(getWrapper((FctPtrType)_spiedNamespace.convertDynSymbolAddr((void*)fadd
     }
 
     DynamicModule* dynamicModule = _spiedNamespace.load(_binName);
-    if(dynamicModule != nullptr) {
+    if(dynamicModule == nullptr) {
         std::cerr << __FUNCTION__ << " : " << _binName << " cannot be found or loaded in the spied namespace"
                   << std::endl;
+        std::invalid_argument("Cannot find "+ _binName +" in the spied namespace");
     }
 
-    std::string mangledFunctionName = DynamicModule::getMangledName(faddr);
+    std::string mangledFunctionName = DynamicModule::getMangledName((void*)faddr);
 
     auto findRela = [this, &mangledFunctionName](uint32_t type, const std::string& name, uint64_t* addr){
         if((type == R_X86_64_GLOB_DAT || type == R_X86_64_JUMP_SLOT) && (name == mangledFunctionName))
         {
             _relaAddr = addr;
-            return true;
+            return false;
         }
-        return false;
+        return true;
     };
 
     dynamicModule->iterateOverRelocations(findRela);

@@ -26,7 +26,23 @@ DynamicModule::DynamicModule(const std::string &name, Lmid_t id)
 {}
 
 void *DynamicModule::getDynamicSymbol(const std::string &symbName) const {
-    return dlsym(_handle, symbName.c_str());
+    void* symbAddr = nullptr;
+    auto& dynstr = _elf.getDynStrTab();
+
+    for(auto& symb : _elf.getDynSymTab()){
+        uint8_t type = ELF64_ST_TYPE(symb.st_info);
+
+        if ((type == STT_FUNC || type == STT_OBJECT) &&     // symbol is a function or an object
+            (symb.st_shndx != 0) &&                         // symbol is defined in the binary
+            symbName == &dynstr[symb.st_name])              // symbol name match symbName
+        {
+            //std::cout << __FUNCTION__ << " : " << symbName << " found " << std::endl;
+            symbAddr = (void *) (_lm->l_addr + symb.st_value);
+            break;
+        }
+    }
+
+    return symbAddr;
 }
 
 void *DynamicModule::getSymbol(const std::string &symbName) const {
@@ -85,11 +101,19 @@ DynamicModule::~DynamicModule() {
 }
 
 void DynamicModule::relink(DynamicModule &module) {
-    // #FIXME add try catch if relink failed
-    _outRelinkages.erase(module.getName());
-    _outRelinkages.emplace(std::piecewise_construct,
-                           std::make_tuple(module.getName()),
-                           std::tuple<DynamicModule &, DynamicModule &>(*this, module));
+
+    auto& dynstr = _elf.getDynStrTab();
+
+    for(auto& dyn: _elf.getDynamic()){
+        if(dyn.d_tag == DT_NEEDED && &dynstr[dyn.d_un.d_val] == module.getName()){
+            // #FIXME add try catch if relink failed
+            _outRelinkages.erase(module.getName());
+            _outRelinkages.emplace(std::piecewise_construct,
+                                   std::make_tuple(module.getName()),
+                                   std::tuple<DynamicModule &, DynamicModule &>(*this, module));
+            break;
+        }
+    }
 }
 
 void DynamicModule::unrelink(const std::string& libName) {
@@ -128,10 +152,9 @@ void DynamicModule::iterateOverRelocations(const std::function<bool(uint32_t, co
         uint32_t relaType = ELF64_R_TYPE(rela.r_info);
         const char* name = &dynstr[dynsym[ELF64_R_SYM(rela.r_info)].st_name];
 
-        if(f(relaType, name, relaAddr)) break;
+        if(!f(relaType, name, relaAddr)) break;
     }
 }
-
 
 
 

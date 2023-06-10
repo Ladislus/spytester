@@ -3,10 +3,13 @@
 #include <stdexcept>
 #include <unistd.h>
 #include <cstring>
+#include <iostream>
+#include <climits>
 
 ElfFile::ElfFile(const std::string &filePath) : _filePath(filePath) {
     _fd = open(_filePath.c_str(), O_RDONLY);
     if(_fd == -1) {
+        std::cerr << "BOUGN : " << filePath << std::endl;
         throw std::invalid_argument(
                 std::string(__FUNCTION__) + " : Failed to load " + _filePath + " : " + strerror(errno));
     }
@@ -160,11 +163,32 @@ const std::vector<Elf64_Rela> &ElfFile::getRela() {
 }
 
 ElfFile &ElfFile::getElfFile(const std::string &filePath) {
-    return elfFiles.emplace(filePath ,filePath).first->second;
+    decltype(elfFiles.begin()) it;
+
+    if(filePath.empty()){
+        char buffer[PATH_MAX];
+        size_t len = readlink("/proc/self/exe", buffer, sizeof(buffer));
+
+        if(len == -1) {
+            throw std::invalid_argument(
+                    std::string(__FUNCTION__) + " : failed to get executable path : " + strerror(errno));
+        }
+        buffer[len] = '\0';
+
+        it = elfFiles.emplace(buffer, buffer).first;
+
+    } else {
+        it = elfFiles.emplace(filePath ,filePath).first;
+    }
+    return it->second;
 }
 
 Elf64_Addr ElfFile::getEntryPoint() const {
     return _elfHeader.e_entry;
+}
+
+const std::vector<Elf64_Shdr> &ElfFile::getShdr() {
+    return _sectHeader;
 }
 
 // elfFiles are used by SpyLoader constructor, so it must be initialized before other static variables with

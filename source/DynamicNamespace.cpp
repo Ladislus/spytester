@@ -135,7 +135,6 @@ bool DynamicNamespace::isContaining(struct link_map *lm) const {
 
 bool DynamicNamespace::iterateOverModule(const std::function<bool(DynamicModule &)> &f) {
     bool res;
-
     syncModules();
 
     for(auto& dynModule : _dynamicLib){

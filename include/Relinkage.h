@@ -21,9 +21,11 @@ public:
 
 private:
     bool _validity;
-    std::vector<std::pair<uint64_t*, uint64_t>> _previousRelocations;
+    std::vector<std::pair<uint64_t*, uint64_t>> _relocations;
     DynamicModule& _source;
     DynamicModule& _destination;
+
+    void writeRelocations();
 };
 
 
