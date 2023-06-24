@@ -323,7 +323,7 @@ bool SpiedThread::handleEvent(SpiedThread::E_State state, int signal, int status
                 std::cout << "SIGSTOP received" << std::endl;
             } else {
                 std::cout << __FUNCTION__ << " : Thread (" << _tid << ") received signal " << signal << "\n";
-                //resume(signal);
+                resume(signal);
                 isEventHandled = true;
             }
         break;

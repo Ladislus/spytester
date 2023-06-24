@@ -53,7 +53,7 @@ void Tracer::createTracee(DynamicNamespace &spiedNamespace){
         std::cerr << "waitpid failed : " << strerror(errno) << std::endl;
     }
     if (WIFSTOPPED(wstatus)){
-        if(ptrace(PTRACE_SETOPTIONS, _traceePid, nullptr, PTRACE_O_TRACECLONE | PTRACE_O_TRACEFORK) == -1){
+        if(ptrace(PTRACE_SETOPTIONS, _traceePid, nullptr, PTRACE_O_TRACECLONE) == -1){
             std::cerr << __FUNCTION__ <<" : PTRACE_O_TRACECLONE failed : "<< strerror(errno) <<std::endl;
         }
         if(ptrace(PTRACE_CONT, _traceePid, nullptr, nullptr) == -1){
