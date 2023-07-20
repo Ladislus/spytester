@@ -1,6 +1,7 @@
-#include <stdexcept>
 #include <iostream>
-#include "../include/DynamicModule.h"
+#include <stdexcept>
+
+#include "DynamicModule.h"
 
 // constructor helpers
 static void* openHandle(const std::string & name, Lmid_t id){
@@ -36,7 +37,6 @@ void *DynamicModule::getDynamicSymbol(const std::string &symbName) const {
             (symb.st_shndx != 0) &&                         // symbol is defined in the binary
             symbName == &dynstr[symb.st_name])              // symbol name match symbName
         {
-            //std::cout << __FUNCTION__ << " : " << symbName << " found " << std::endl;
             symbAddr = (void *) (_lm->l_addr + symb.st_value);
             break;
         }
@@ -59,7 +59,6 @@ void *DynamicModule::getSymbol(const std::string &symbName) const {
                 (symb.st_shndx != 0) &&                         // symbol is defined in the binary
                 symbName == &strtab[symb.st_name])              // symbol name match symbName
             {
-                //std::cout << __FUNCTION__ << " : " << symbName << " found " << std::endl;
                 symbolAddr = (void *) (_lm->l_addr + symb.st_value);
                 break;
             }

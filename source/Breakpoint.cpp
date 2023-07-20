@@ -1,36 +1,41 @@
 #include <iostream>
 #include <sys/procfs.h>
 
-#include "../include/Breakpoint.h"
+#include "Breakpoint.h"
 
 BreakPoint::BreakPoint(Tracer &tracer, CallbackHandler &callbackHandler, const std::string &&name, void *addr) :
-_addr((uint64_t *)addr), _name(name), _isSet(false), _tracer(tracer),
-_callbackHandler(callbackHandler), _onHit(BreakPoint::defaultOnHit){}
+    _addr((uint64_t *)addr),
+    _name(name),
+    _isSet(false),
+    _tracer(tracer),
+    _callbackHandler(callbackHandler),
+    _onHit(BreakPoint::defaultOnHit) {}
 
-void *BreakPoint::getAddr() const{
-    return _addr;
+void* BreakPoint::getAddr() const { return this->_addr; }
+
+bool BreakPoint::set() {
+    if (!this->_isSet) {
+        this->_backup = *this->_addr;
+
+        uint64_t newWord = (this->_backup & (~0xFF)) | INT3;
+        this->_tracer.writeWord(this->_addr, newWord);
+
+        info_log("Breakpoint (" << _name << ") set at " << _addr);
+
+        this->_isSet = true;
+    }
+
+    return this->_isSet;
 }
 
-bool BreakPoint::set(){
-    if (!_isSet) {
-        _backup = *_addr;
-        uint64_t newWord = (_backup & (~0xFF)) | INT3;
 
-        _tracer.writeWord(_addr, newWord);
-        std::cout << "BreakPoint::set : breakpoint (" << _name << ") set at " << _addr << std::endl;
-        _isSet = true;
+bool BreakPoint::unset() {
+    if (this->_isSet) {
+        this->_tracer.writeWord(this->_addr, this->_backup);
+        info_log("BreakPoint (" << _name << ") unset");
+        this->_isSet = false;
     }
-    return _isSet;
-}
-
-
-bool BreakPoint::unset(){
-    if (_isSet) {
-        _tracer.writeWord(_addr, _backup);
-        std::cout << "BreakPoint::unset : breakpoint (" << _name << ") unset" << std::endl;
-        _isSet = false;
-    }
-    return !_isSet;
+    return !this->_isSet;
 }
 
 bool BreakPoint::resumeAndSet(SpiedThread &spiedThread)
@@ -39,15 +44,15 @@ bool BreakPoint::resumeAndSet(SpiedThread &spiedThread)
     gettimeofday(&start, nullptr);
 
     spiedThread.jump((void*)(spiedThread.getRip()-1));
-    bool res = unset()
+    bool res =
+            unset()
             && spiedThread.singleStep()
             && set()
             && spiedThread.resume();
 
     gettimeofday(&stop, nullptr);
 
-    std::cerr << __FUNCTION__ << " executed in : "
-            << (stop.tv_sec - start.tv_sec)*1000000 + (stop.tv_usec - start.tv_usec) << std::endl;
+    info_log("Executed in " << (stop.tv_sec - start.tv_sec) * 1'000'000 + (stop.tv_usec - start.tv_usec) << "ms");
 
     return res;
 }
@@ -57,15 +62,13 @@ bool BreakPoint::resumeAndUnset(SpiedThread &spiedThread) {
     return unset() && spiedThread.resume();
 }
 
-void BreakPoint::setOnHitCallback(std::function<void (BreakPoint&, SpiedThread&)>&& callback) {
-    _breakPointMutex.lock();
-    _onHit = callback;
-    _breakPointMutex.unlock();
+void BreakPoint::setOnHitCallback(BreakpointCallback&& callback) {
+    const LockGuard lk(this->_breakPointMutex);
+    this->_onHit = callback;
 }
 
 void BreakPoint::defaultOnHit(BreakPoint& breakPoint, SpiedThread& spiedThread) {
-    std::cout << __FUNCTION__ << " : thread " << spiedThread.getTid() << " hit breakpoint "
-              << breakPoint._name << " at 0x" << std::hex << breakPoint._addr << std::dec << std::endl;
+    info_log("Thread " << spiedThread.getTid() << " hit breakpoint " << breakPoint._name + " at 0x" << std::hex << breakPoint._addr);
 }
 
 void BreakPoint::hit(SpiedThread &spiedThread) {

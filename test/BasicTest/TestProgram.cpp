@@ -1,10 +1,9 @@
 #include <pthread.h>
-
 #include <iostream>
 #include <unistd.h>
-#include "TestLib.h"
-
 #include <sys/sysinfo.h>
+
+#include "TestLib.h"
 
 void TestFunction()
 {

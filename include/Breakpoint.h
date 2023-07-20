@@ -2,37 +2,26 @@
 #define SPYTESTER_BREAKPOINT_H
 
 
+#include <queue>
 #include <string>
 #include <vector>
-#include <queue>
+#include <mutex>
+#include <sstream>
+
 #include "Tracer.h"
+#include "CallbackHandler.h"
+#include "SpiedThread.h"
 
 class BreakPoint {
-public:
-    BreakPoint(Tracer &tracer, CallbackHandler &callbackHandler, const std::string &&name, void *addr);
-
-    ~BreakPoint() = default;
-
-    void* getAddr() const;
-
-    bool set();
-    bool unset();
-
-    void setOnHitCallback(std::function<void (BreakPoint&, SpiedThread&)>&& callback);
-    void hit(SpiedThread& spiedThread);
-
-    bool resumeAndUnset(SpiedThread &spiedThread);
-    bool resumeAndSet(SpiedThread &spiedThread);
-
-    inline bool operator==(void* addr) const{
-        return addr == _addr;
-    }
-
 private:
+
+    using BreakpointCallback = std::function<void(BreakPoint&, SpiedThread&)>;
+    using Mutex = std::recursive_mutex;
+    using LockGuard = std::lock_guard<Mutex>;
+
     const static uint8_t INT3 = 0xCC;
 
-    std::recursive_mutex _breakPointMutex;
-
+    Mutex _breakPointMutex;
     const std::string _name;
     uint64_t * const _addr;
     uint64_t _backup;
@@ -41,12 +30,28 @@ private:
     CallbackHandler& _callbackHandler;
 
     // callback function
-    std::function<void (BreakPoint&, SpiedThread&)> _onHit;
+    BreakpointCallback _onHit;
 
     // default callback function
     static void defaultOnHit(BreakPoint& breakPoint, SpiedThread& spiedThread);
 
+public:
 
+    BreakPoint(Tracer &tracer, CallbackHandler &callbackHandler, const std::string &&name, void* addr);
+    ~BreakPoint() = default;
+
+    void* getAddr() const;
+
+    bool set();
+    bool unset();
+
+    void setOnHitCallback(BreakpointCallback&& callback);
+    void hit(SpiedThread& spiedThread);
+
+    bool resumeAndUnset(SpiedThread &spiedThread);
+    bool resumeAndSet(SpiedThread &spiedThread);
+
+    inline bool operator==(void* addr) const { return addr == this->_addr; }
 };
 
 

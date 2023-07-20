@@ -2,24 +2,22 @@
 #define SPYTESTER_SPIEDPROGRAM_H
 
 
-#include "SpiedThread.h"
-#include "Breakpoint.h"
-#include "Tracer.h"
-#include "WrappedFunction.h"
-#include "WatchPoint.h"
-#include "CallbackHandler.h"
-#include "DynamicNamespace.h"
-#include "SpyLoader.h"
-
+#include <map>
+#include <numeric>
+#include <set>
+#include <string>
 #include <sys/mman.h>
 #include <unistd.h>
-
-#include <string>
-#include <map>
-#include <set>
 #include <vector>
-#include <numeric>
 
+#include "Breakpoint.h"
+#include "CallbackHandler.h"
+#include "DynamicNamespace.h"
+#include "SpiedThread.h"
+#include "SpyLoader.h"
+#include "Tracer.h"
+#include "WatchPoint.h"
+#include "WrappedFunction.h"
 
 class SpiedProgram {
 private:

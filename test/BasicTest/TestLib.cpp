@@ -1,5 +1,6 @@
-#include "TestLib.h"
 #include <iostream>
+
+#include "TestLib.h"
 
 volatile int b = 87;
 

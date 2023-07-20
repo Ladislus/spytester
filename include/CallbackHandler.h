@@ -1,27 +1,39 @@
 #ifndef SPYTESTER_CALLBACKHANDLER_H
 #define SPYTESTER_CALLBACKHANDLER_H
 
+
 #include <functional>
-#include <thread>
-#include <queue>
 #include <mutex>
+#include <queue>
+#include <thread>
+
 #include <semaphore.h>
 
-class CallbackHandler {
-public :
-    CallbackHandler();
-    ~CallbackHandler();
-    void executeCallback(const std::function<void()>& callback);
+#include "Logger.h"
 
+class CallbackHandler {
 private :
+
+    // Local aliases to reduce typing/increase meaning
+    using Callback = std::function<void()>;
+    using CallbackQueue = std::queue<Callback>;
+    using Semaphore = sem_t;
+
+    // Attributs
     bool _running;
     std::thread _callbackHandler;
-    std::queue<std::function<void()>> _callbacks;
+    CallbackQueue _callbacks;
     std::mutex _callbackMutex;
-    sem_t _callbackSem;
+    Semaphore _callbackSem;
 
+    // Functions
     void handleCallback();
 
+public :
+    // Public interface
+    CallbackHandler();
+    ~CallbackHandler();
+    void executeCallback(const Callback& callback);
 };
 
 

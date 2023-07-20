@@ -1,9 +1,11 @@
 #ifndef SPYTESTER_WATCHPOINT_H
 #define SPYTESTER_WATCHPOINT_H
 
+
 #include <cstdint>
 #include <functional>
 #include <mutex>
+
 #include "CallbackHandler.h"
 
 class SpiedThread;

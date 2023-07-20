@@ -2,13 +2,14 @@
 #define SPYTESTER_SPIEDTHREAD_H
 
 
-#include <csignal>
-#include <mutex>
 #include <condition_variable>
-#include <sys/user.h>
+#include <csignal>
 #include <future>
-#include "WatchPoint.h"
+#include <mutex>
+#include <sys/user.h>
+
 #include "CallbackHandler.h"
+#include "WatchPoint.h"
 
 class Tracer;
 class SpiedProgram;

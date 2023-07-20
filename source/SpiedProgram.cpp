@@ -1,16 +1,13 @@
-#include "../include/SpiedProgram.h"
-
 #include <iostream>
 #include <sys/wait.h>
 
+#include "SpiedProgram.h"
 
 SpiedProgram::~SpiedProgram(){
     _breakPoints.clear();
     _spiedThreads.clear();
 
    _eventListener.join();
-
-    std::cout << __FUNCTION__ << std::endl;
 }
 
 void SpiedProgram::start() {
@@ -50,13 +47,13 @@ bool SpiedProgram::relink(const std::string &libName) {
 
 
     if(curNamespace == nullptr){
-        std::cerr<< __FUNCTION__ << " cannot find the current namespace" << std::endl;
+        error_log("Cannot find the current namespace");
         return false;
     }
 
     spiedModule = _spiedNamespace.load(libName);
     if(spiedModule == nullptr){
-        std::cerr << __FUNCTION__ <<" cannot load " << libName << std::endl;
+        error_log("Cannot load " << libName);
         return false;
     }
 
@@ -65,16 +62,14 @@ bool SpiedProgram::relink(const std::string &libName) {
             dynModule.relink(*spiedModule);
         }
         catch(std::invalid_argument& e) {
-            std::cerr << "failed to relink " << dynModule.getName() << " -> " << spiedModule->getName() << " : "
-                      << e.what() << std::endl;
+            error_log("failed to relink " << dynModule.getName() << " -> " << spiedModule->getName() << " (" << e.what() << ")");
             return false;
         }
         return true;
     });
 
-    if(!isRelinked){
-        std::cerr << __FUNCTION__ << " : the relinking failed and may be partially achieved" << std::endl;
-    }
+    if(!isRelinked)
+        error_log("The relinking failed and may be partially achieved");
 
     return isRelinked;
 }
@@ -103,7 +98,7 @@ void SpiedProgram::listenEvent() {
                 /*
                 if(_ptraceEvent != PTRACE_EVENT_STOP) {
                     if(tracer.commandPTrace(true, PTRACE_GETEVENTMSG, _tid, nullptr, &_ptraceEventMsg) == -1) {
-                        std::cerr << __FUNCTION__ << " : PTRACE_GETEVENTMSG failed : " << strerror(errno) << std::endl;
+                        error_log("PTRACE_GETEVENTMSG failed : " << strerror(errno));
                     }
                 }*/
             }
@@ -116,14 +111,14 @@ void SpiedProgram::listenEvent() {
             state = SpiedThread::TERMINATED;
             signal = WTERMSIG(wstatus);
         } else {
-            std::cerr << __FUNCTION__ << " : unknown wstatus : " << std::hex << wstatus << std::dec <<std::endl;
+            error_log("Unknown wstatus " << std::hex << wstatus);
         }
 
         auto threadIt = std::find_if(_spiedThreads.begin(), _spiedThreads.end(),
                                    [tid](auto& st) { return *st == tid; });
 
         if(threadIt == _spiedThreads.end()){
-            std::cout << __FUNCTION__ << " : New thread (" << tid << ") detected \n";
+            info_log("New thread (" << tid << ") detected");
 
             auto& spiedThread = *_spiedThreads.emplace_back(
                     std::make_unique<SpiedThread>(_tracer, _callbackHandler, tid));

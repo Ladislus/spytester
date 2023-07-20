@@ -1,8 +1,12 @@
-#include <iostream>
-#include <cstring>
 #include <algorithm>
+#include <cstring>
+#include <iostream>
 #include <list>
-#include "../include/SpyLoader.h"
+
+#include "SpyLoader.h"
+#include "Logger.h"
+
+#include "helpers/filesystem.h"
 
 // Can be overload using SPIED_NAMESPACES_NB environnement variable
 #define SPIED_NAMESPACES_NB 3
@@ -25,25 +29,21 @@ extern "C" {
 }
 
 int pthread_key_create(pthread_key_t *key, void (*destructor)(void *)) noexcept {
-    std::cout << __FUNCTION__ << std::endl;
     auto& loader = getSpyLoader();
     return loader.pthreadKeyCreate(key, destructor);
 }
 
-int pthread_key_delete(pthread_key_t key) noexcept{
-    std::cout << __FUNCTION__ << std::endl;
+int pthread_key_delete(pthread_key_t key) noexcept {
     auto& loader = getSpyLoader();
     return loader.pthreadKeyDelete(key);
 }
 
-void __ctype_init() noexcept{
-    std::cout << __FUNCTION__ << std::endl;
+void __ctype_init() noexcept {
     auto& loader = getSpyLoader();
     return loader.ctypeInit();
 }
 
-void dl_init_static_tls(struct link_map* lm) noexcept{
-    std::cout << __FUNCTION__ << std::endl;
+void dl_init_static_tls(struct link_map* lm) noexcept {
     auto& loader = getSpyLoader();
     loader.initStaticTLS(lm);
 }
@@ -66,18 +66,17 @@ SpyLoader::SpyLoaderInitializer::SpyLoaderInitializer() {;
         }
 
         SpyLoader::spyLoader = new SpyLoader();
-        SpyLoader::spyLoader->createSpiedNamespaces(namespaceNb);
+        SpyLoader::spyLoader->createSpiedNamespaces(static_cast<uint32_t>(namespaceNb));
     } else {
         handle = dlmopen(LM_ID_BASE, "libSpyLoader.so", RTLD_LAZY | RTLD_NOLOAD);
-        if(handle == nullptr){
-            std::cerr << __FUNCTION__ << " : dlmopen libSpyLoader.so failed : " << dlerror() << std::endl;
-            std::abort();
-        }
+        if(!handle)
+            fatal_log("Dlmopen libSpyLoader.so failed : " << dlerror());
+
         auto getMasterSpyLoader =  dlsym(handle, "getSpyLoader");
         SpyLoader::spyLoader = &((SpyLoader& (*)())getMasterSpyLoader)();
     }
 
-    std::cout << __FUNCTION__ << " : spyLoader in namespace " << lmid << std::endl;
+    info_log("SpyLoader in namespace " << lmid);
 }
 
 SpyLoader &getSpyLoader() {
@@ -90,17 +89,12 @@ SpyLoader::SpyLoader() : _baseNamespace() {
 
     // load libpthread in the current namespace
     DynamicModule* libpthread = _baseNamespace.load("libpthread.so.0");
-    if(libpthread == nullptr){
-        std::cerr << __FUNCTION__ <<" : failed to load libpthread.so.0 in base namespace" << std::endl;
-        std::abort();
-    }
+    if(!libpthread)
+        fatal_log("Failed to load libpthread.so.0 in base namespace");
 
     void* pthread_init_static_tls = libpthread->getSymbol("__pthread_init_static_tls");
-    if(pthread_init_static_tls == nullptr) {
-        std::cerr << __FUNCTION__ << " : failed to find __pthread_init_static_tls in libpthread.so.0 in base namespace"
-                  << std::endl;
-        std::abort();
-    }
+    if(!pthread_init_static_tls)
+        fatal_log("Failed to find __pthread_init_static_tls in libpthread.so.0 in base namespace");
 
     auto rtld_global_it = (uint64_t*)&_rtld_global;
     // #FIXME check we are not going past the end of _rtld_global
@@ -111,38 +105,40 @@ SpyLoader::SpyLoader() : _baseNamespace() {
 
     // get __stack_user which is used by libpthread to keep track of threads managed by the library
     _baseStackUserList = (list_t*) libpthread->getSymbol("__stack_user");
-    if(_baseStackUserList == nullptr){
-        std::cerr << __FUNCTION__ << " : failed to find __stack_user in libpthread.so.0 in base namespace" << std::endl;
-        std::abort();
-    }
+    if(!this->_baseStackUserList)
+        fatal_log("Failed to find __stack_user in libpthread.so.0 in base namespace");
+
     _defaultThreadStack = _baseStackUserList->next;
 
     updateWrappedFunctions(_baseNamespace);
-
 }
 
 void SpyLoader::createSpiedNamespaces(uint32_t nb) {
 
     if(!_avlNamespaceId.empty() || !_usedNamespace.empty() ){
-        std::cerr << __FUNCTION__ <<" should only be called once" <<std::endl;
+        error_log("Should only be called once");
         return;
     }
 
     std::list<DynamicNamespace> namespaces;
 
+    // 'canonical("/proc/self/exe")' is a UNIX specific way to obtain current executable path (not current working directory)
+    const Path libSpyLoaderPath = fs::canonical("/proc/self/exe").parent_path().append("libSpyLoader.so");
+
     for(uint32_t i = 0; i < nb; i++){
-        void* handle = dlmopen(LM_ID_NEWLM, "libSpyLoader.so", RTLD_LAZY);
+        void* handle = dlmopen(LM_ID_NEWLM, libSpyLoaderPath.c_str(), RTLD_LAZY);
 
         if(handle == nullptr){
-            std::cerr << __FUNCTION__ <<" : failed to load libSpyLoader.so : "<< dlerror() << std::endl;
+            error_log("Failed to load libSpyLoader.so " << dlerror());
             continue;
         }
 
         Lmid_t id;
         if(dlinfo(handle, RTLD_DI_LMID, &id) != 0){
-            std::cerr << __FUNCTION__ <<" : dlinfo failed : " << dlerror() << std::endl;
+            error_log("Dlinfo failed : " << dlerror());
             continue;
         }
+
         _avlNamespaceId.insert(id);
         updateWrappedFunctions(namespaces.emplace_back(0, nullptr, nullptr));
 
@@ -153,17 +149,14 @@ void SpyLoader::createSpiedNamespaces(uint32_t nb) {
 void SpyLoader::updateWrappedFunctions(DynamicNamespace &spiedNamespace) {
     // libpthread
     DynamicModule* libpthread = spiedNamespace.load("libpthread.so.0");
-    if(libpthread == nullptr){
-        std::cerr << __FUNCTION__ <<" : failed to load libpthread.so.0" << std::endl;
-        std::abort();
-    }
+    if(!libpthread)
+        fatal_log("Failed to load libpthread.so.0");
 
     // init_static_tls
     void* pthread_init_static_tls = libpthread->getSymbol("__pthread_init_static_tls");
-    if(pthread_init_static_tls == nullptr) {
-        std::cerr << __FUNCTION__ << " : failed to find __pthread_init_static_tls in libpthread.so.0" << std::endl;
-        std::abort();
-    }
+    if(!pthread_init_static_tls)
+        fatal_log("Failed to find __pthread_init_static_tls in libpthread.so.0");
+
     _init_static_tls_functions.push_back((init_static_tls_fptr) pthread_init_static_tls);
 
     // override _rtld_global._dl_init_static_tls with our custom function
@@ -171,26 +164,22 @@ void SpyLoader::updateWrappedFunctions(DynamicNamespace &spiedNamespace) {
 
     // pthread_key_delete
     auto pthread_key_del = libpthread->getSymbol("pthread_key_delete");
-    if(pthread_key_del == nullptr) {
-        std::cerr << __FUNCTION__ << " : failed to find pthread_key_delete in libpthread.so.0" << std::endl;
-        std::abort();
-    }
+    if(!pthread_key_del)
+        fatal_log("Failed to find pthread_key_delete in libpthread.so.0");
+
     _pthread_key_delete_functions.push_back( (pthread_key_delete_fptr) pthread_key_del);
 
     // pthread_key_create
     auto pthread_key_cre = libpthread->getSymbol("pthread_key_create");
-    if(pthread_key_cre == nullptr) {
-        std::cerr << __FUNCTION__ << " : failed to find pthread_key_create in libpthread.so.0" << std::endl;
-        std::abort();
-    }
+    if(!pthread_key_cre)
+        fatal_log("Failed to find pthread_key_create in libpthread.so.0");
+
     _pthread_key_create_functions.push_back((pthread_key_create_fptr) pthread_key_cre);
 
     // repair __stack_user
     auto stackUserList = (list_t*) libpthread->getSymbol("__stack_user");
-    if(stackUserList == nullptr) {
-        std::cerr << __FUNCTION__ << " : failed to find __stack_user in libpthread.so.0" << std::endl;
-        std::abort();
-    }
+    if(!stackUserList)
+        fatal_log("Failed to find __stack_user in libpthread.so.0");
 
     // remove default thread from the list managed by libpthread
     stackUserList->prev = stackUserList;
@@ -204,17 +193,14 @@ void SpyLoader::updateWrappedFunctions(DynamicNamespace &spiedNamespace) {
 
     // libc
     DynamicModule* libc = spiedNamespace.load("libc.so.6");
-    if(libc == nullptr){
-        std::cerr << __FUNCTION__ <<" : failed to load libc.so.6" << std::endl;
-        std::abort();
-    }
+    if(!libc)
+        fatal_log("Failed to load libc.so.6");
 
     // __ctype_init
     void* ctype_init = libc->getSymbol("__ctype_init");
-    if(ctype_init == nullptr) {
-        std::cerr << __FUNCTION__ << " : failed to find __ctype_init in libc.so.6.so.0" << std::endl;
-        std::abort();
-    }
+    if(!ctype_init)
+        fatal_log("Failed to find __ctype_init in libc.so.6.so.0");
+
     _ctype_init_functions.push_back((ctype_init_fptr) ctype_init);
 }
 
@@ -222,9 +208,8 @@ int SpyLoader::pthreadKeyCreate(pthread_key_t *key, void (*destructor)(void *)) 
     std::lock_guard lk(_pthreadKeyMutex);
 
     int res = _pthread_key_create_functions[0](key, destructor);
-    if (res != 0) {
-        std::cerr << __FUNCTION__ << " : pthread_key_create in base namespace failed : "
-                  << strerror(res) << std::endl;
+    if (res) {
+        error_log("Pthread_key_create in base namespace failed " << strerror(res));
         return res;
     }
 
@@ -232,13 +217,11 @@ int SpyLoader::pthreadKeyCreate(pthread_key_t *key, void (*destructor)(void *)) 
         pthread_key_t tmpKey;
 
         res = _pthread_key_create_functions[idx](&tmpKey, destructor);
-        if (res != 0) {
-            std::cerr << __FUNCTION__ << " : pthread_key_create in namespace " << idx << " failed : "
-                      << strerror(res) << std::endl;
+        if (res) {
+            error_log("Pthread_key_create in namespace " << idx << " failed " << strerror(res));
             return res;
         } else if (*key != tmpKey) {
-            std::cerr << __FUNCTION__ << " : incoherent thread key in namespace " << idx << " (expected : " << tmpKey
-                      << " / returned : " << *key << ")" << std::endl;
+            error_log("Incoherent thread key in namespace " << idx << " (expected : " << tmpKey << " / returned : " << *key << ")");
             return -1; // #FIXME find a better error code
         }
     }
@@ -251,12 +234,12 @@ int SpyLoader::pthreadKeyDelete(pthread_key_t key) noexcept {
 
     for(auto pthrread_key_del : _pthread_key_delete_functions){
         int res = pthrread_key_del(key);
-        if (res != 0) {
-            std::cerr << __FUNCTION__ << " : pthread_key_delete failed in one namespace : "
-                      << strerror(res) << std::endl;
+        if (res) {
+            error_log("Pthread_key_delete failed in one namespace " << strerror(res));
             return res;
         }
     }
+
     return 0;
 }
 
@@ -291,18 +274,18 @@ void SpyLoader::releaseNamespaceId(Lmid_t id) {
     if(!node.empty()){
         _avlNamespaceId.insert(node.key());
     } else {
-        std::cerr << __FUNCTION__ << " : try to release unused namespace "<< id << std::endl;
+        error_log("Try to release unused namespace " << id);
     }
 }
 
 DynamicNamespace *SpyLoader::getCurrentNamespace(){
-    void* retAddr = __builtin_return_address(0);
+    void* retAddr =  __builtin_extract_return_addr(__builtin_return_address(0));
 
     Dl_info info;
     struct link_map* lm;
 
     if(dladdr1(retAddr, &info, (void**)(&lm), RTLD_DL_LINKMAP) == 0){
-        std::cerr << __FUNCTION__ << " : dladdr1 failed for "<< (void*) retAddr <<" : " << dlerror() << std::endl;
+        error_log("Dladdr1 failed for "<< (void*) retAddr << ": " << dlerror());
         return nullptr;
     }
 
@@ -310,16 +293,17 @@ DynamicNamespace *SpyLoader::getCurrentNamespace(){
         return &_baseNamespace;
     }
 
+
     auto it = std::find_if(_usedNamespace.cbegin(), _usedNamespace.cend(),[lm](const auto& pair){
         return pair.second.isContaining(lm);
     });
-
+    
     if(it == _usedNamespace.cend()) {
-        std::cerr << __FUNCTION__ << " is called from a namespace that is not supposed to be used" << dlerror()
-                  << std::endl;
+        error_log("Called from a namespace that is not supposed to be used" << dlerror());
         return nullptr;
     }
 
     return &(it->second);
+
 }
 

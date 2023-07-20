@@ -1,18 +1,24 @@
 #ifndef TEST_ELFBIN_H
 #define TEST_ELFBIN_H
 
-#include <link.h>
-#include <string>
-#include <set>
-#include <map>
+
 #include <functional>
-#include "Relinkage.h"
+#include <link.h>
+#include <map>
+#include <set>
+#include <string>
+
 #include "ElfFile.h"
+#include "Relinkage.h"
 
 class DynamicModule {
+private:
+
+    using LinkMap = struct link_map;
+
     const std::string _name;
     void* _handle;
-    struct link_map* _lm;
+    LinkMap* _lm;
     ElfFile& _elf;
 
     std::set<Relinkage*> _inRelinkages;

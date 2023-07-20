@@ -1,11 +1,11 @@
-#include "../../include/SpiedProgram.h"
-#include "TestLib.h"
-
-#include <iostream>
 #include <cstdlib>
-
+#include <iostream>
 #include <unistd.h>
 
+#include "SpiedProgram.h"
+#include "TestLib.h"
+
+#include "helpers/filesystem.h"
 
 int main(int argc, char* argv[], char* envp[])
 {
@@ -19,7 +19,15 @@ int main(int argc, char* argv[], char* envp[])
     try{
         std::string holi("holi");
 
-        SpiedProgram prog(argv[1], "hola", holi);
+        if (!fs::exists(argv[1])) {
+            std::cerr << "ERROR: Path \"" << argv[1] << "\" doesn't exist !" << std::endl;
+            exit(1);
+        }
+
+        const Path selfFullPath         = fs::canonical(argv[0]);
+        const Path spiedProgramFullPath = fs::canonical(argv[1]);
+
+        SpiedProgram prog(spiedProgramFullPath, "hola", holi);
         SpiedThread* mainThread = nullptr;
         SpiedThread* lastCreatedThread = nullptr;
 

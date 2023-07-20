@@ -1,16 +1,18 @@
 #ifndef SPYTESTER_WRAPPEDFUNCTION_H
 #define SPYTESTER_WRAPPEDFUNCTION_H
 
+
 #include <cstdint>
-#include <string>
+#include <cstring>
 #include <dlfcn.h>
 #include <elf.h>
 #include <link.h>
+#include <string>
 #include <sys/ptrace.h>
-#include <cstring>
 
 #include "Tracer.h"
 #include "Meta.h"
+#include "Logger.h"
 
 #ifndef WRAPPER_MAX_NB
 #define WRAPPER_MAX_NB 10
@@ -57,7 +59,7 @@ private:
         Wrapper& operator[](uint32_t idx){ return wrappers[idx];}
     };
 
-    static      std::mutex freeWrappersMutex;
+    static std::mutex freeWrappersMutex;
     static Wrappers wrappers;
 
     static Wrapper& getWrapper(FctPtrType wrappedFunction);
@@ -71,7 +73,6 @@ private:
     Wrapper& _wrapper;
     std::string _binName;
     void* _relaAddr;
-
 };
 
 template<auto faddr>
@@ -88,9 +89,9 @@ void WrappedFunction<faddr>::releaseWrapper(WrappedFunction::Wrapper &wrapper) {
 template<auto faddr>
 typename WrappedFunction<faddr>::Wrapper &WrappedFunction<faddr>::getWrapper(FctPtrType wrappedFunction) {
     std::lock_guard lk(freeWrappersMutex);
-    if(wrappers.available.empty()){
-        std::cerr << __FUNCTION__ << " : no available wrapper for "<< (void*)faddr << std::endl;
-    }
+    if(wrappers.available.empty())
+        error_log("No available wrapper for "<< (void*)faddr);
+
 
     Wrapper& wrapper = *wrappers.available.back();
     wrapper.wrappedFunction = wrappedFunction;
@@ -115,7 +116,7 @@ WrappedFunction<faddr>::getStaticWrapper(TRET(*fct)(TARGS ...)) {
         try {
             return wrappers[idx].dynamicWrapper(args ...);
         } catch (const std::bad_function_call& e){
-            std::cerr << "WrapperFctPtr : " << e.what() << std::endl;
+            error_log("WrapperFctPtr : " << e.what());
             return wrappers[idx].wrappedFunction(args ...);
         }
     };
@@ -129,19 +130,19 @@ void WrappedFunction<faddr>::setWrapper(FctType&& wrapper){
 
 template<auto faddr>
 WrappedFunction<faddr>::WrappedFunction(Tracer& tracer, DynamicNamespace& dynamicNamespace, std::string binName):
-_tracer(tracer), _spiedNamespace(dynamicNamespace), _relaAddr(nullptr), _binName(std::move(binName)),
-_wrapper(getWrapper((FctPtrType)_spiedNamespace.convertDynSymbolAddr((void*)faddr)))
-{
-    if(_wrapper.wrappedFunction == nullptr){
-        std::cerr << __FUNCTION__ << " : failed to find function (" << (void*)faddr
-                  << ") definition in spied namespace" << std::endl;
+    _tracer(tracer), 
+    _spiedNamespace(dynamicNamespace),
+    _relaAddr(nullptr), 
+    _binName(std::move(binName)),
+    _wrapper(getWrapper((FctPtrType)_spiedNamespace.convertDynSymbolAddr((void*)faddr))) {
+    if(!this->_wrapper.wrappedFunction) {
+        error_log("Failed to find function (" << (void*)faddr << ") definition in spied namespace");
         std::invalid_argument("Cannot find function definition");
     }
 
     DynamicModule* dynamicModule = _spiedNamespace.load(_binName);
-    if(dynamicModule == nullptr) {
-        std::cerr << __FUNCTION__ << " : " << _binName << " cannot be found or loaded in the spied namespace"
-                  << std::endl;
+    if(!dynamicModule) {
+        error_log(_binName << " cannot be found or loaded in the spied namespace");
         std::invalid_argument("Cannot find "+ _binName +" in the spied namespace");
     }
 
@@ -158,9 +159,8 @@ _wrapper(getWrapper((FctPtrType)_spiedNamespace.convertDynSymbolAddr((void*)fadd
 
     dynamicModule->iterateOverRelocations(findRela);
 
-    if(_relaAddr == nullptr) {
-        std::cerr << __FUNCTION__ << " : failed to find for " << _wrapper.wrappedFunction
-                  << " in relocation table of " << _binName << std::endl;
+    if(!_relaAddr) {
+        error_log("Failed to find for " << _wrapper.wrappedFunction << " in relocation table of " << _binName);
         std::invalid_argument("Cannot find function in relocation table");
     }
 }
@@ -173,7 +173,7 @@ bool WrappedFunction<faddr>::wrapping(bool active){
         auto futureRes = _tracer.writeWord(_relaAddr, (uint64_t)addr);
         auto res = futureRes.get();
         if ( res.first == -1) {
-            std::cout << "WrappedFunction::wrap : writeWord failed : " << strerror(res.second) << std::endl;
+            error_log("WriteWord failed : " << strerror(res.second));
             return false;
         }
     }
@@ -181,8 +181,8 @@ bool WrappedFunction<faddr>::wrapping(bool active){
 }
 
 template<auto faddr>
-WrappedFunction<faddr>::~WrappedFunction(){
-    _tracer.writeWord(_relaAddr, (uint64_t)_wrapper.wrappedFunction);
+WrappedFunction<faddr>::~WrappedFunction() {
+    this->_tracer.writeWord(_relaAddr, (uint64_t)_wrapper.wrappedFunction);
     releaseWrapper(_wrapper);
 }
 

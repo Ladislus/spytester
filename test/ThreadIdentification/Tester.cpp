@@ -1,5 +1,5 @@
 #include <iostream>
-#include "../../include/SpiedProgram.h"
+#include "SpiedProgram.h"
 #include "TestedLib.h"
 #include <unistd.h>
 

@@ -1,15 +1,17 @@
-#include "../include/ElfFile.h"
+#include <climits>
+#include <cstring>
 #include <fcntl.h>
+#include <iostream>
 #include <stdexcept>
 #include <unistd.h>
-#include <cstring>
-#include <iostream>
-#include <climits>
+
+#include "ElfFile.h"
+#include "Logger.h"
 
 ElfFile::ElfFile(const std::string &filePath) : _filePath(filePath) {
     _fd = open(_filePath.c_str(), O_RDONLY);
     if(_fd == -1) {
-        std::cerr << "BOUGN : " << filePath << std::endl;
+        error_log("BOUGN : " << filePath);
         throw std::invalid_argument(
                 std::string(__FUNCTION__) + " : Failed to load " + _filePath + " : " + strerror(errno));
     }
@@ -167,11 +169,11 @@ ElfFile &ElfFile::getElfFile(const std::string &filePath) {
 
     if(filePath.empty()){
         char buffer[PATH_MAX];
-        size_t len = readlink("/proc/self/exe", buffer, sizeof(buffer));
+        ssize_t len = readlink("/proc/self/exe", buffer, sizeof(buffer));
 
         if(len == -1) {
-            throw std::invalid_argument(
-                    std::string(__FUNCTION__) + " : failed to get executable path : " + strerror(errno));
+            error_log("Failed to get executable path, Readlink failed with errror \"" << strerror(errno) << "\"");
+            throw std::invalid_argument(std::string(__FUNCTION__) + " : failed to get executable path : " + strerror(errno));
         }
         buffer[len] = '\0';
 
@@ -184,11 +186,11 @@ ElfFile &ElfFile::getElfFile(const std::string &filePath) {
 }
 
 Elf64_Addr ElfFile::getEntryPoint() const {
-    return _elfHeader.e_entry;
+    return this->_elfHeader.e_entry;
 }
 
 const std::vector<Elf64_Shdr> &ElfFile::getShdr() {
-    return _sectHeader;
+    return this->_sectHeader;
 }
 
 // elfFiles are used by SpyLoader constructor, so it must be initialized before other static variables with

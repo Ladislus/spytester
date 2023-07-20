@@ -1,4 +1,4 @@
-#include "../../include/SpiedProgram.h"
+#include "SpiedProgram.h"
 #include <cstdlib>
 #include <sys/sysinfo.h>
 

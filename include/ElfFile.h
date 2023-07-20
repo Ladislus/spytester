@@ -1,14 +1,11 @@
-//
-// Created by baptiste on 03/06/23.
-//
-
 #ifndef SPYTESTER_ELFFILE_H
 #define SPYTESTER_ELFFILE_H
 
-#include <map>
-#include <string>
+
 #include <elf.h>
+#include <map>
 #include <optional>
+#include <string>
 #include <vector>
 
 class ElfFile {

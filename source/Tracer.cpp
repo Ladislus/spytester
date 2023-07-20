@@ -1,14 +1,16 @@
-#include <sys/ptrace.h>
-#include <iostream>
 #include <cstring>
-#include <wait.h>
-#include <unistd.h>
-#include "../include/Tracer.h"
-#include "../include/SpiedProgram.h"
-
-#include <sys/syscall.h>
-#define gettid() syscall(SYS_gettid)
 #include <dlfcn.h>
+#include <iostream>
+#include <sys/ptrace.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+#include <wait.h>
+
+#include "SpiedProgram.h"
+#include "Tracer.h"
+#include "Logger.h"
+
+#define gettid() syscall(SYS_gettid)
 
 #define tgkill(tgid, tid, sig) syscall(SYS_tgkill, tgid, tid, sig)
 
@@ -16,14 +18,14 @@ Tracer::Tracer()
 : _state(NOT_STARTED)
 {
     if(sem_init(&_cmdsSem, 0, 0) == -1){
-        std::cerr << __FUNCTION__ << " : semaphore initialization failed : " << strerror(errno) << std::endl;
+        error_log("Semaphore initialization failed : " << strerror(errno));
         throw std::invalid_argument("invalid sem init");
     }
 
     _stack = mmap(nullptr, stackSize, PROT_READ | PROT_WRITE,
                   MAP_PRIVATE | MAP_ANONYMOUS | MAP_STACK, -1, 0);
     if (_stack == MAP_FAILED) {
-        std::cerr << __FUNCTION__ << " : stack allocation failed : " << strerror(errno) << std::endl;
+        error_log("Stack allocation failed : " << strerror(errno));
         throw std::invalid_argument("Cannot allocate stack");
     }
 }
@@ -43,31 +45,29 @@ void Tracer::createTracee(DynamicNamespace &spiedNamespace){
     _traceePid = clone(preStart, stackTop, cloneFlags, &spiedNamespace);
 
     if(_traceePid == -1){
-        std::cerr << __FUNCTION__ <<" : clone failed : "<< strerror(errno) <<std::endl;
+        error_log("Clone failed : " << strerror(errno));
         return;
     }
 
     // Wait for spied program process to be created
     int wstatus;
     if(waitpid(_traceePid, &wstatus, 0) == -1){
-        std::cerr << "waitpid failed : " << strerror(errno) << std::endl;
+        error_log("Waitpid failed " << strerror(errno));
     }
-    if (WIFSTOPPED(wstatus)){
-        if(ptrace(PTRACE_SETOPTIONS, _traceePid, nullptr, PTRACE_O_TRACECLONE) == -1){
-            std::cerr << __FUNCTION__ <<" : PTRACE_O_TRACECLONE failed : "<< strerror(errno) <<std::endl;
-        }
-        if(ptrace(PTRACE_CONT, _traceePid, nullptr, nullptr) == -1){
-            std::cerr << __FUNCTION__ <<" : PTRACE_CONT failed for starter" << std::endl;
-        }
+    if (WIFSTOPPED(wstatus)) {
+        if(ptrace(PTRACE_SETOPTIONS, _traceePid, nullptr, PTRACE_O_TRACECLONE) == -1)
+            error_log("PTRACE_O_TRACECLONE failed : " << strerror(errno));
+
+        if(ptrace(PTRACE_CONT, _traceePid, nullptr, nullptr) == -1)
+            error_log("PTRACE_CONT failed for starter");
     }
 
     // Wait for pre start to create the main thread
-    if(waitpid(_traceePid, &wstatus, 0) == -1){
-        std::cerr << __FUNCTION__ << " : waitpid failed (create starter): " << strerror(errno) << std::endl;
-    }
-    if(ptrace(PTRACE_CONT, _traceePid, nullptr, nullptr) == -1){
-        std::cerr << __FUNCTION__ <<" : PTRACE_CONT failed for starter" << std::endl;
-    }
+    if(waitpid(_traceePid, &wstatus, 0) == -1)
+        error_log("Waitpid failed (create starter): " << strerror(errno));
+
+    if(ptrace(PTRACE_CONT, _traceePid, nullptr, nullptr) == -1)
+        error_log("PTRACE_CONT failed for starter");
 }
 
 void Tracer::trace(DynamicNamespace &spiedNamespace, std::promise<pid_t> promise){
@@ -94,30 +94,28 @@ void Tracer::trace(DynamicNamespace &spiedNamespace, std::promise<pid_t> promise
         }
         _cmdsMutex.unlock();
     }
-    std::cout << __FUNCTION__ << " : stop handling commands!" << std::endl;
+
+    info_log("Stop handling commands!");
 }
 
 
 int Tracer::preStart(void * spiedNamespace) {
-    if(ptrace(PTRACE_TRACEME, 0, NULL, NULL) == -1) {
-        std::cerr<< __FUNCTION__ << " : PTRACE_TRACEME failed : " << strerror(errno) << std::endl;
-        std::exit(1);
-    }
-    if( raise(SIGSTOP) != 0)
-    {
-        std::cerr<<__FUNCTION__<<" : ptrace failed : " << strerror(errno) << std::endl;
-        std::exit(1);
-    }
+    if(ptrace(PTRACE_TRACEME, 0, NULL, NULL) == -1)
+        fatal_log("PTRACE_TRACEME failed " << strerror(errno));
+
+    if(raise(SIGSTOP) != 0)
+        fatal_log("Ptrace failed " << strerror(errno));
+
     DynamicNamespace::createMainThread(reinterpret_cast<DynamicNamespace *>(spiedNamespace));
     return 0;
 }
 
 int Tracer::tkill(pid_t tid, int sig) {
     _cmdsMutex.lock();
-    _commands.emplace([this, tid, sig]{
-        if(tgkill(_traceePid, tid, sig) == -1){
-            std::cerr << "tgkill("<< tid <<", "<<sig<<") failed : " << strerror(errno) << std::endl;
-        }
+    _commands.emplace([this, tid, sig] {
+        if(tgkill(_traceePid, tid, sig) == -1)
+            error_log("tgkill(" << tid << ", " << sig << ") failed (" << strerror(errno) << ")");
+
         return true;
     });
     _cmdsMutex.unlock();
@@ -143,9 +141,6 @@ Tracer::~Tracer() {
 
     _tracer.join();
     sem_destroy(&_cmdsSem);
-
-
-    std::cout<< __FUNCTION__ << std::endl;
 }
 
 std::future<std::pair<long, int>> Tracer::writeWord(void *addr, uint64_t val) {

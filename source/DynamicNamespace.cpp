@@ -1,8 +1,10 @@
-#include <thread>
 #include <csignal>
 #include <iostream>
-#include "../include/DynamicNamespace.h"
-#include "../include/SpyLoader.h"
+#include <thread>
+
+#include "DynamicNamespace.h"
+#include "SpyLoader.h"
+#include "Logger.h"
 
 static struct link_map* getLinkMap(Lmid_t id){
     void* handle = dlmopen(id, "libSpyLoader.so", RTLD_LAZY);
@@ -17,24 +19,31 @@ static struct link_map* getLinkMap(Lmid_t id){
                                      std::to_string(id) + " : " + dlerror()));
     }
 
-    while(lm->l_prev != nullptr){
-        lm =lm->l_prev;
-    }
+    while(lm->l_prev) lm = lm->l_prev;
 
     return lm;
 }
 
-DynamicNamespace::DynamicNamespace()
-: _id(LM_ID_BASE), _lm(getLinkMap(_id)), _argc(0), _argv(nullptr), _envp(nullptr), _executable(),
-_loader("libSpyLoader.so", _id), _createMainThread(nullptr)
-{}
+DynamicNamespace::DynamicNamespace(): 
+    _id(LM_ID_BASE),
+    _lm(getLinkMap(_id)),
+    _argc(0),
+    _argv(nullptr),
+    _envp(nullptr),
+    _executable(),
+    _loader("libSpyLoader.so", _id),
+    _createMainThread(nullptr) {}
 
 
-DynamicNamespace::DynamicNamespace(int argc, const char* argv[], char **envp)
-: _id(getSpyLoader().reserveNamespaceId(*this)), _lm(getLinkMap(_id)), _argc(argc), _argv(argv), _envp(envp),
-_executable(), _loader("libSpyLoader.so", _id), // IMPROVE if loader constructor throw exception, we won't be able to release _id
-_createMainThread((decltype(_createMainThread)) _loader.getSymbol((void*) &DynamicNamespace::createMainThread))
-{
+DynamicNamespace::DynamicNamespace(int argc, const char* argv[], char **envp):
+    _id(getSpyLoader().reserveNamespaceId(*this)),
+    _lm(getLinkMap(_id)),
+    _argc(argc),
+    _argv(argv),
+    _envp(envp),
+    _executable(),
+    _loader("libSpyLoader.so", _id), // IMPROVE if loader constructor throw exception, we won't be able to release _id
+    _createMainThread((decltype(_createMainThread)) _loader.getSymbol((void*) &DynamicNamespace::createMainThread)) {
     if(_createMainThread == nullptr) {
         getSpyLoader().releaseNamespaceId(_id);
         throw (std::invalid_argument(std::string(__FUNCTION__) +
@@ -44,9 +53,8 @@ _createMainThread((decltype(_createMainThread)) _loader.getSymbol((void*) &Dynam
 }
 
 DynamicNamespace::~DynamicNamespace() {
-    if(_id != LM_ID_BASE){
+    if(_id != LM_ID_BASE)
         getSpyLoader().releaseNamespaceId(_id);
-    }
 }
 
 DynamicModule *DynamicNamespace::load(const std::string &binName) {
@@ -56,13 +64,13 @@ DynamicModule *DynamicNamespace::load(const std::string &binName) {
                                                   std::make_tuple(binName, _id)).first->second;
         return &bin;
     } catch(std::invalid_argument& e){
-        std::cout << __FUNCTION__ <<" : failed to create DynamicModule : " << e.what() << std::endl;
+        error_log("Failed to create DynamicModule (" << e.what() << ")");
         return nullptr;
     }
 }
 
 void DynamicNamespace::unload(const std::string& binName){
-    _dynamicLib.erase(binName);
+    this->_dynamicLib.erase(binName);
 }
 
 void DynamicNamespace::createMainThread(DynamicNamespace *ns) {
@@ -85,7 +93,7 @@ void DynamicNamespace::loadExecutable() {
 
     void* entryPoint = exec.getEntryPoint();
     if(entryPoint == nullptr){
-        std::cerr << __FUNCTION__ << " : cannot find entry point in " << _argv[0] << std::endl;
+        error_log("Cannot find entry point in " << _argv[0]);
     }
 
     // Give user some time after loading to do some actions before entering the main
@@ -98,26 +106,25 @@ void *DynamicNamespace::convertDynSymbolAddr(void *addr) const {
     Dl_info info;
 
     if (dladdr(addr, &info) == 0){
-        std::cerr << __FUNCTION__ <<" : dladdr failed on " << addr <<" : " << dlerror() << std::endl;
+        error_log("Dladdr failed on " << addr << " (" << dlerror() << ")");
         return nullptr;
     }
 
     if(info.dli_saddr != addr){
-        std::cerr << __FUNCTION__ <<" : " << addr << "is not a valid function pointer " << std::endl;
+        error_log(addr << "is not a valid function pointer");
         return nullptr;
     }
 
     void* handle = dlmopen(_id, info.dli_fname, RTLD_NOLOAD | RTLD_LAZY);
 
     if(handle == nullptr){
-        std::cerr << __FUNCTION__ <<" : dlmopen failed : " << dlerror() << std::endl;
+        error_log("Dlmopen failed (" << dlerror() << ")");
         return nullptr;
     }
 
     void* retAddr = dlsym(handle, info.dli_sname);
-    if(retAddr == nullptr){
-        std::cerr << __FUNCTION__ <<" : dlsym failed : "<<dlerror() << std::endl;
-    }
+    if(!retAddr)
+        error_log("Dlsym failed (" << dlerror() << ")");
 
     return retAddr;
 }
@@ -134,7 +141,7 @@ bool DynamicNamespace::isContaining(struct link_map *lm) const {
 }
 
 bool DynamicNamespace::iterateOverModule(const std::function<bool(DynamicModule &)> &f) {
-    bool res;
+    bool res(false);
     syncModules();
 
     for(auto& dynModule : _dynamicLib){
@@ -180,7 +187,7 @@ void start(void* entryPoint, int argc, const char* argv[], char* envp[]){
     char** env = envp;
     for(; *env != nullptr; env++); // set env point to the last environment variable
 
-    uint64_t wordsToPush = argc + 4 + (env-envp);
+    uint64_t wordsToPush = static_cast<uint64_t>(argc + 4 + (env-envp));
 
     // guarantee that the stack pointer will be 16-bytes aligned when entryPoint is called
     if((uint64_t)(sp + wordsToPush) & 0xF){
@@ -209,7 +216,7 @@ void start(void* entryPoint, int argc, const char* argv[], char* envp[]){
 
     // Push argc onto the stack
     sp--;
-    *sp = argc;
+    *sp = static_cast<uint64_t>(argc);
 
     //initialize register and jump to entry point
     __asm__ volatile(
@@ -220,7 +227,7 @@ void start(void* entryPoint, int argc, const char* argv[], char* envp[]){
             ::"r"(sp), "r"(entryPoint): "%rdx");
 
     // dummy call to force gcc to decrement sp at start entry
-    exit(0);
+    std::exit(0);
 }
 
 

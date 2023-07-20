@@ -1,23 +1,22 @@
 #ifndef SPYTESTER_TRACER_H
 #define SPYTESTER_TRACER_H
 
-#include <set>
 #include <csignal>
-#include <map>
-#include <mutex>
-#include <memory>
-#include <iostream>
+#include <cstring>
 #include <functional>
+#include <iostream>
+#include <list>
+#include <map>
+#include <memory>
+#include <mutex>
 #include <queue>
+#include <semaphore.h>
+#include <set>
+#include <sys/ptrace.h>
 #include <thread>
 
-#include <sys/ptrace.h>
-#include <semaphore.h>
-#include <cstring>
-#include <list>
-
-#include "SpiedThread.h"
 #include "DynamicNamespace.h"
+#include "SpiedThread.h"
 
 class SpiedProgram;
 class DynamicLinker;

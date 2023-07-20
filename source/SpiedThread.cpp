@@ -1,11 +1,12 @@
-#include "../include/SpiedThread.h"
-#include "../include/Tracer.h"
-
-#include <sys/ptrace.h>
 #include <chrono>
-#include <iostream>
-#include <sys/user.h>
 #include <dlfcn.h>
+#include <iostream>
+#include <sys/ptrace.h>
+#include <sys/user.h>
+
+#include "SpiedThread.h"
+#include "Tracer.h"
+#include "Logger.h"
 
 #define STATE_TIMEOUT std::chrono::seconds(5)
 
@@ -20,7 +21,7 @@ _isSigTrapExpected(false), _regs{}, _regSync(OLD), _dr6{}
 }
 
 SpiedThread::~SpiedThread() {
-    std::cout << __FUNCTION__ << " : " << _tid << std::endl;
+    info_log(_tid);
 }
 
 pid_t SpiedThread::getTid() const {
@@ -44,7 +45,7 @@ bool SpiedThread::resume(int signum) {
 
     auto res = _tracer.commandPTrace(PTRACE_CONT, _tid, nullptr, signum);
     setState(CONTINUED);
-    std::cout << __FUNCTION__ << " : Thread ("<< _tid << ") resumed \n";
+    info_log("Thread (" << _tid << ") resumed");
 
     return success;
 }
@@ -61,7 +62,7 @@ bool SpiedThread::singleStep() {
     if (!_stateCV.wait_for(stateLk, STATE_TIMEOUT, [this] { return _state == STOPPED; })) {
         success = false;
         _isSigTrapExpected = false;
-        std::cerr << "SpiedThread::singleStep timeout for thread " << _tid << std::endl;
+        error_log("Timeout for thread " << _tid);
     }
 
     return success;
@@ -76,7 +77,7 @@ bool SpiedThread::stop() {
         _tracer.tkill(_tid, SIGSTOP);
         if (!_stateCV.wait_for(lk, STATE_TIMEOUT, [this] { return _state == STOPPED; })) {
             success = false;
-            std::cerr << "SpiedThread::stop timeout for " << _tid << std::endl;
+            error_log("Timeout for " << _tid);
         }
     }
 
@@ -95,14 +96,14 @@ bool SpiedThread::terminate() {
         _tracer.tkill(_tid, SIGTERM);
 
         if (!_stateCV.wait_for(lk, STATE_TIMEOUT, [this] { return _state == STOPPED; })) {
-            std::cerr << "SpiedThread::terminate STOPPED timeout for " << _tid << std::endl;
+            error_log("STOPPED timeout for " << _tid);
             return false;
         }
 
         resume(SIGTERM);
 
         if(!_stateCV.wait_for(lk, STATE_TIMEOUT, [this] { return (_state == TERMINATED) || (_state == EXITED);})) {
-            std::cerr << "SpiedThread::terminate TERMINATE timeout for " << _tid << std::endl;
+            error_log("TERMINATE timeout for " << _tid);
             return false;
         }
     }
@@ -141,32 +142,29 @@ bool SpiedThread::backtrace() {
     // Print thread current position
     Dl_info info;
     if (dladdr((void *) rip, &info) == 0) {
-        std::cout << "SpiedThread::backtrace : thread " << _tid << " at " << (void *)rip << std::endl;
+        info_log("Thread " << _tid << " at " << (void *)rip);
     } else {
         if (info.dli_sname != nullptr) {
-            std::cout << "SpiedThread::backtrace : thread " << _tid << " at " << info.dli_sname << " ("
-                      << info.dli_fname << ")" << std::endl;
+            info_log("Thread " << _tid << " at " << info.dli_sname << " (" << info.dli_fname << ")");
         } else {
-            std::cout << "thread " << _tid << " at " << (void *) rip
-                      << " (" << info.dli_fname << ")" << std::endl;
+            info_log("Thread " << _tid << " at " << (void *) rip << " (" << info.dli_fname << ")");
             return true;
         }
     }
 
     // Print call stack
     auto rbp = (uint64_t *) getRbp();
-    while (rbp != nullptr) {
+    while (rbp) {
         uint64_t retAddr = *(rbp + 1);
         rbp = (uint64_t *) (*rbp);
 
-        if (dladdr((void *) retAddr, &info) == 0) {
-            break;
-        } else {
-            if (info.dli_sname != nullptr) {
-                std::cout << "\tfrom " << info.dli_sname << " (" << info.dli_fname << ")" << std::endl;
-            } else {
-                std::cout << "\tfrom ?? (" << (void *) retAddr << ") (" << info.dli_fname << ")" << std::endl;
-            }
+        if (!dladdr((void *) retAddr, &info)) break;
+
+        if (info.dli_sname) {
+            info_log("\tfrom " << info.dli_sname << " (" << info.dli_fname << ")");
+        }
+        else {
+            info_log("\tfrom ?? (" << (void *) retAddr << ") (" << info.dli_fname << ")");
         }
     }
     return true;
@@ -176,7 +174,7 @@ bool SpiedThread::detach() {
     auto futureRes = _tracer.commandPTrace(PTRACE_DETACH, (_tid-2), 0, SIGSTOP);
     auto res = futureRes.get();
     if(res.first != 0){
-        std::cerr << __FUNCTION__ << " PTRACE_DETACH failed : " << strerror(res.second) << std::endl;
+        error_log("PTRACE_DETACH failed " << strerror(res.second));
     }
 
     return (res.first == 0);
@@ -270,19 +268,19 @@ bool SpiedThread::handleEvent(SpiedThread::E_State state, int signal, int status
 
     switch(state){
         case CONTINUED:
-            std::cout << __FUNCTION__ << " : Thread (" << _tid << ") is running \n";
+            info_log("Thread (" << _tid << ") is running");
             setState(CONTINUED);
             isEventHandled = true;
         break;
 
         case EXITED:
-            std::cout << __FUNCTION__ << " : Thread (" << _tid << ") exited with status " << status << "\n";
+            info_log("Thread (" << _tid << ") exited with status " << status);
             setState(EXITED);
             isEventHandled = true;
         break;
 
         case TERMINATED:
-            std::cout << __FUNCTION__ << " : Thread (" << _tid << ") terminated with signal " << signal << "\n";
+            info_log("Thread (" << _tid << ") terminated with signal " << signal);
             setState(TERMINATED);
             isEventHandled = true;
         break;
@@ -311,18 +309,18 @@ bool SpiedThread::handleEvent(SpiedThread::E_State state, int signal, int status
                     }
                 }
             } else if(signal == SIGSEGV) {
-                std::cout << "SIGSEGV received" << std::endl;
+                info_log("SIGSEGV received");
                 backtrace();
                /* resume(SIGSTOP);
                 detach();
-                std::string gdbCommand = "gdb attach "+std::to_string(_tid-2);
+                std::string gdbCommand = "gdb attach " + std::to_string(_tid - 2);
                 if(system(gdbCommand.c_str()) != 0){
-                    std::cerr <<"Gdb attach failed" << std::endl;
+                    error_log("Gdb attach failed");
                 }*/
             } else if(signal == SIGSTOP){
-                std::cout << "SIGSTOP received" << std::endl;
+                info_log("SIGSTOP received");
             } else {
-                std::cout << __FUNCTION__ << " : Thread (" << _tid << ") received signal " << signal << "\n";
+                info_log("Thread (" << _tid << ") received signal " << signal);
                 resume(signal);
                 isEventHandled = true;
             }

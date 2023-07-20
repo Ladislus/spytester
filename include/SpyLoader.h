@@ -1,10 +1,11 @@
 #ifndef SPYTESTER_SPYLOADER_H
 #define SPYTESTER_SPYLOADER_H
 
+#include <mutex>
 #include <optional>
 #include <thread>
-#include <mutex>
 #include <vector>
+
 #include "DynamicNamespace.h"
 
 class SpyLoader;
@@ -16,6 +17,7 @@ extern "C" {
 typedef struct list_head list_t;
 
 class SpyLoader {
+
 public :
     friend SpyLoader& getSpyLoader();
 
@@ -33,6 +35,7 @@ public :
     void releaseNamespaceId(Lmid_t id);
 
     DynamicNamespace* getCurrentNamespace();
+
 private:
     SpyLoader();
     ~SpyLoader() = default;
@@ -68,6 +71,5 @@ private:
 
     static SpyLoaderInitializer spyLoaderInitializer;
 };
-
 
 #endif //SPYTESTER_SPYLOADER_H

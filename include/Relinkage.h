@@ -1,8 +1,8 @@
 #ifndef SPYTESTER_RELINKAGE_H
 #define SPYTESTER_RELINKAGE_H
 
-#include <vector>
 #include <cstdint>
+#include <vector>
 
 class DynamicModule;
 

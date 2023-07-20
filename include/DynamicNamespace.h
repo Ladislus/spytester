@@ -1,7 +1,9 @@
 #ifndef SPYTESTER_DYNAMICNAMESPACE_H
 #define SPYTESTER_DYNAMICNAMESPACE_H
 
+
 #include <map>
+
 #include "DynamicModule.h"
 
 class SpyLoader;

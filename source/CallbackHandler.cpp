@@ -1,49 +1,52 @@
-
-#include "../include/CallbackHandler.h"
-#include <iostream>
 #include <cstring>
+#include <iostream>
 
-CallbackHandler::CallbackHandler() : _running(true) {
-    if(sem_init(&_callbackSem, 0, 0) == -1){
-        std::cerr << __FUNCTION__ << " : semaphore initialization failed : " << strerror(errno) << std::endl;
-        throw std::invalid_argument("invalid sem init");
+#include "CallbackHandler.h"
+
+CallbackHandler::CallbackHandler(): _running(true) {
+    if(sem_init(&this->_callbackSem, 0, 0) == -1){
+        error_log("Semaphore initialization failed (" << strerror(errno) << ")");
+        throw std::invalid_argument("Invalid sem init");
     }
 
-    _callbackHandler = std::thread(&CallbackHandler::handleCallback, this);
+    this->_callbackHandler = std::thread(&CallbackHandler::handleCallback, this);
 }
 
 CallbackHandler::~CallbackHandler() {
-    _running = false;
-    sem_post(&_callbackSem);
+    this->_running = false;
+    if (sem_post(&this->_callbackSem) == -1)
+        error_log("Semaphore post failed (" << strerror(errno) << ")");
 
-    _callbackHandler.join();
+    this->_callbackHandler.join();
 
-    sem_destroy(&_callbackSem);
+    if (sem_destroy(&this->_callbackSem) == -1)
+        error_log("Semaphore destruction failed (" << strerror(errno) << ")");
 }
 
-void CallbackHandler::executeCallback(const std::function<void()> &callback) {
-    _callbackMutex.lock();
-    _callbacks.push(callback);
-    _callbackMutex.unlock();
+void CallbackHandler::executeCallback(const Callback& callback) {
+    this->_callbackMutex.lock();
+    this->_callbacks.push(callback);
+    this->_callbackMutex.unlock();
 
-    sem_post(&_callbackSem);
+    if (sem_post(&this->_callbackSem) == -1)
+        error_log("Semaphore post failed (" << strerror(errno) << ")");
 }
 
 void CallbackHandler::handleCallback() {
-    while(sem_wait(&_callbackSem) == 0){
+    while(sem_wait(&this->_callbackSem) == 0){
 
-        _callbackMutex.lock();
-        while(!_callbacks.empty()){
-            auto callback = std::move(_callbacks.front());
-            _callbacks.pop();
-            _callbackMutex.unlock();
+        this->_callbackMutex.lock();
+        while(!this->_callbacks.empty()){
+            auto callback = std::move(this->_callbacks.front());
+            this->_callbacks.pop();
+            this->_callbackMutex.unlock();
 
             callback();
 
-            _callbackMutex.lock();
+            this->_callbackMutex.lock();
         }
-        _callbackMutex.unlock();
+        this->_callbackMutex.unlock();
 
-        if(!_running) break;
+        if(!this->_running) break;
     }
 }

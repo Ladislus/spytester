@@ -1,5 +1,5 @@
 #include <iostream>
-#include "../../include/SpyLoader.h"
+#include "SpyLoader.h"
 #include <thread>
 #include <future>
 
